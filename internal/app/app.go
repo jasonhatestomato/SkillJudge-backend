@@ -1,0 +1,150 @@
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"skilljudge/backend/internal/bootstrap"
+	"skilljudge/backend/internal/config"
+	"skilljudge/backend/internal/http/middleware"
+	"skilljudge/backend/internal/modules/auth"
+	"skilljudge/backend/internal/modules/project"
+	"skilljudge/backend/internal/modules/scoring"
+	"skilljudge/backend/internal/modules/system"
+	"skilljudge/backend/internal/modules/task"
+	"skilljudge/backend/internal/modules/user"
+	"skilljudge/backend/internal/modules/video"
+	"skilljudge/backend/internal/platform/cache"
+	"skilljudge/backend/internal/platform/database"
+	platformjwt "skilljudge/backend/internal/platform/jwt"
+	"skilljudge/backend/internal/platform/storage"
+
+	"github.com/gin-gonic/gin"
+)
+
+type App struct {
+	engine *gin.Engine
+	port   string
+}
+
+func New() (*App, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+
+	db, err := database.NewPostgres(cfg.DB)
+	if err != nil {
+		return nil, fmt.Errorf("application startup aborted: %w", err)
+	}
+
+	redisClient, err := cache.NewRedis(cfg.Redis)
+	if err != nil {
+		return nil, fmt.Errorf("application startup aborted: %w", err)
+	}
+
+	if err := bootstrap.Run(routerContext(), db, cfg.Bootstrap); err != nil {
+		return nil, fmt.Errorf("application startup aborted: bootstrap failed: %w", err)
+	}
+
+	userRepo := user.NewRepository(db)
+	userService := user.NewService(userRepo)
+	projectRepo := project.NewRepository(db)
+	projectService := project.NewService(projectRepo)
+	taskRepo := task.NewRepository(db)
+	taskService := task.NewService(taskRepo, projectRepo)
+	storageProvider := storage.NewProvider(cfg.Storage)
+	scoringRepo := scoring.NewRepository(db)
+	scoringService := scoring.NewService(scoringRepo, taskService, storageProvider)
+	videoRepo := video.NewRepository(db)
+	videoService := video.NewService(videoRepo, projectRepo, taskService, storageProvider)
+
+	jwtManager := platformjwt.NewManager(cfg.JWT.Issuer, cfg.JWT.Secret)
+	sessionStore := auth.NewSessionStore(redisClient)
+	authService := auth.NewService(userRepo, userService, sessionStore, jwtManager, cfg.JWT)
+
+	authHandler := auth.NewHandler(authService, userService)
+	projectHandler := project.NewHandler(projectService)
+	scoringHandler := scoring.NewHandler(scoringService)
+	systemHandler := system.NewHandler(db, redisClient)
+	taskHandler := task.NewHandler(taskService)
+	userHandler := user.NewHandler(userService)
+	videoHandler := video.NewHandler(videoService)
+
+	router := gin.Default()
+	// Route registration stays centralized here so module wiring and
+	// permission boundaries can be audited from a single entry point.
+	registerRoutes(router, authService, userService, authHandler, systemHandler, userHandler, projectHandler, taskHandler, scoringHandler, videoHandler)
+
+	return &App{
+		engine: router,
+		port:   cfg.HTTP.Port,
+	}, nil
+}
+
+func routerContext() context.Context {
+	return context.Background()
+}
+
+func (a *App) Run() error {
+	return a.engine.Run(fmt.Sprintf(":%s", a.port))
+}
+
+func registerRoutes(router *gin.Engine, authService *auth.Service, userService *user.Service, authHandler *auth.Handler, systemHandler *system.Handler, userHandler *user.Handler, projectHandler *project.Handler, taskHandler *task.Handler, scoringHandler *scoring.Handler, videoHandler *video.Handler) {
+	router.GET("/health", systemHandler.Health)
+	router.GET("/ready", systemHandler.Ready)
+
+	api := router.Group("/api/v1")
+
+	authGroup := api.Group("/auth")
+	authGroup.POST("/login", authHandler.Login)
+	authGroup.POST("/refresh", authHandler.Refresh)
+	authGroup.POST("/logout", middleware.RequireAuth(authService), authHandler.Logout)
+
+	userGroup := api.Group("/users", middleware.RequireAuth(authService))
+	userGroup.GET("/me", userHandler.GetMe)
+	userGroup.PATCH("/me", userHandler.UpdateMe)
+	userGroup.POST("", middleware.RequirePermission(userService, "user:create"), userHandler.Create)
+	userGroup.GET("", middleware.RequirePermission(userService, "user:read"), userHandler.List)
+	userGroup.PATCH("/:id", middleware.RequirePermission(userService, "user:update"), userHandler.Update)
+	userGroup.DELETE("/:id", middleware.RequirePermission(userService, "user:delete"), userHandler.Delete)
+
+	projectGroup := api.Group("/projects", middleware.RequireAuth(authService))
+	projectGroup.POST("", middleware.RequirePermission(userService, "project:create"), projectHandler.Create)
+	projectGroup.GET("", middleware.RequirePermission(userService, "project:read"), projectHandler.List)
+	projectGroup.GET("/:id", middleware.RequirePermission(userService, "project:read"), projectHandler.Get)
+	projectGroup.PATCH("/:id", middleware.RequirePermission(userService, "project:update"), projectHandler.Update)
+	projectGroup.DELETE("/:id", middleware.RequirePermission(userService, "project:delete"), projectHandler.Delete)
+	projectGroup.POST("/:projectId/tasks", middleware.RequirePermission(userService, "task:create"), taskHandler.Create)
+	projectGroup.GET("/:projectId/tasks", middleware.RequirePermission(userService, "task:read"), taskHandler.ListByProject)
+
+	taskGroup := api.Group("/tasks", middleware.RequireAuth(authService))
+	taskGroup.GET("/my", middleware.RequirePermission(userService, "task:read"), scoringHandler.ListMyTasks)
+	taskGroup.GET("/:id", middleware.RequirePermission(userService, "task:read"), func(c *gin.Context) {
+		actor := middleware.CurrentUser(c)
+		// Phase 1 keeps the API path in api.md, but scorers use this route as a
+		// "scoring task" view backed by video assignment data instead of batch detail.
+		if actor.Role == "scorer" {
+			scoringHandler.GetTaskDetail(c)
+			return
+		}
+		taskHandler.Get(c)
+	})
+	taskGroup.POST("/:id/submit", middleware.RequirePermission(userService, "task:submit"), scoringHandler.SubmitTask)
+	taskGroup.POST("/:id/assignments", middleware.RequirePermission(userService, "task:update"), scoringHandler.AssignScorers)
+
+	rubricGroup := api.Group("/rubrics", middleware.RequireAuth(authService))
+	rubricGroup.POST("", middleware.RequirePermission(userService, "rubric:create"), projectHandler.CreateRubric)
+	rubricGroup.POST("/upload-template", middleware.RequirePermission(userService, "rubric:create"), projectHandler.UploadRubricTemplate)
+	rubricGroup.GET("", middleware.RequirePermission(userService, "rubric:read"), projectHandler.ListRubrics)
+	rubricGroup.GET("/:id", middleware.RequirePermission(userService, "rubric:read"), projectHandler.GetRubric)
+	rubricGroup.PATCH("/:id", middleware.RequirePermission(userService, "rubric:update"), projectHandler.UpdateRubric)
+	rubricGroup.DELETE("/:id", middleware.RequirePermission(userService, "rubric:delete"), projectHandler.DeleteRubric)
+
+	videoGroup := api.Group("/videos", middleware.RequireAuth(authService))
+	videoGroup.POST("/upload-credential", middleware.RequirePermission(userService, "video:create"), videoHandler.CreateUploadCredential)
+	videoGroup.POST("/:id/confirm-upload", middleware.RequirePermission(userService, "video:create"), videoHandler.ConfirmUpload)
+	videoGroup.GET("", middleware.RequirePermission(userService, "video:read"), videoHandler.List)
+	videoGroup.GET("/:id", middleware.RequirePermission(userService, "video:read"), videoHandler.Get)
+	videoGroup.DELETE("/:id", middleware.RequirePermission(userService, "video:delete"), videoHandler.Delete)
+}
