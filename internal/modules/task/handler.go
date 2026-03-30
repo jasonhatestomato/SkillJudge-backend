@@ -66,6 +66,8 @@ func (h *Handler) Create(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrTaskNameRequired), errors.Is(err, ErrTaskRubricRequired):
 			response.Error(c, http.StatusBadRequest, err.Error(), nil)
+		case errors.Is(err, ErrTaskNameConflict):
+			response.Error(c, http.StatusConflict, err.Error(), nil)
 		case errors.Is(err, project.ErrProjectNotFound), errors.Is(err, project.ErrRubricNotFound):
 			response.Error(c, http.StatusNotFound, err.Error(), nil)
 		case errors.Is(err, ErrTaskProjectScope), errors.Is(err, ErrTaskRoleNotAllowed):

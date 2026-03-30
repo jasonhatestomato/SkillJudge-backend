@@ -32,7 +32,9 @@ func NewRepository(db *gorm.DB) *Repository {
 }
 
 func (r *Repository) Create(ctx context.Context, item *model.Video) error {
-	return r.db.WithContext(ctx).Create(item).Error
+	return r.db.WithContext(ctx).
+		Omit("ProjectID", "SchoolID", "StorageURL", "UploadID", "CreatorID").
+		Create(item).Error
 }
 
 func (r *Repository) FindByID(ctx context.Context, id uuid.UUID) (*model.Video, error) {
@@ -59,7 +61,26 @@ func (r *Repository) FindByID(ctx context.Context, id uuid.UUID) (*model.Video, 
 	return &item, nil
 }
 
+func (r *Repository) FindLatestManualEvaluation(ctx context.Context, videoID uuid.UUID) (*model.ManualEvaluation, error) {
+	var item model.ManualEvaluation
+	err := r.db.WithContext(ctx).
+		Model(&model.ManualEvaluation{}).
+		Where("video_id = ?", videoID).
+		Order("submitted_at DESC NULLS LAST, updated_at DESC").
+		First(&item).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &item, nil
+}
+
 func (r *Repository) Update(ctx context.Context, id uuid.UUID, updates map[string]any) error {
+	delete(updates, "storage_url")
+	delete(updates, "upload_id")
 	return r.db.WithContext(ctx).Model(&model.Video{}).Where("id = ?", id).Updates(updates).Error
 }
 
@@ -80,8 +101,8 @@ func (r *Repository) List(ctx context.Context, params ListParams) ([]model.Video
 	if params.TaskID != nil {
 		query = query.Where("task_id = ?", *params.TaskID)
 	} else if params.ProjectID != uuid.Nil {
-		query = query.Joins("LEFT JOIN tasks ON tasks.id = videos.task_id").
-			Where("tasks.project_id = ? OR videos.project_id = ?", params.ProjectID, params.ProjectID)
+		query = query.Joins("JOIN tasks ON tasks.id = videos.task_id").
+			Where("tasks.project_id = ?", params.ProjectID)
 	}
 
 	if params.Status != "" {

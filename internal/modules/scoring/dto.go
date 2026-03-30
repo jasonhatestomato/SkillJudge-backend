@@ -54,6 +54,16 @@ type AssignScorersResult struct {
 	Tasks   []AssignedTaskDTO `json:"tasks"`
 }
 
+type AssignableScorerDTO struct {
+	ID       uuid.UUID `json:"id"`
+	Username string    `json:"username"`
+	RealName *string   `json:"realName,omitempty"`
+}
+
+type AssignableScorersResult struct {
+	Items []AssignableScorerDTO `json:"items"`
+}
+
 type MyTasksListParams struct {
 	Page      int
 	PageSize  int
@@ -74,6 +84,7 @@ type MyTaskTaskDTO struct {
 type MyTaskVideoDTO struct {
 	ID            uuid.UUID `json:"id"`
 	Filename      string    `json:"filename"`
+	OriginalFilename *string `json:"originalFilename,omitempty"`
 	StudentName   string    `json:"studentName"`
 	StudentNumber string    `json:"studentNumber"`
 	Duration      *int      `json:"duration,omitempty"`
@@ -122,6 +133,7 @@ type ScoringTaskDetailVideoDTO struct {
 	StudentName   string    `json:"studentName"`
 	StudentNumber string    `json:"studentNumber"`
 	Filename      string    `json:"filename"`
+	OriginalFilename *string `json:"originalFilename,omitempty"`
 	Status        string    `json:"status"`
 }
 
@@ -199,6 +211,7 @@ func toMyTaskListItemDTO(video *model.Video, playURL *string) MyTaskListItemDTO 
 		Video: MyTaskVideoDTO{
 			ID:            video.ID,
 			Filename:      video.Filename,
+			OriginalFilename: video.OriginalFilename,
 			StudentName:   video.StudentName,
 			StudentNumber: video.StudentNumber,
 			Duration:      video.Duration,
@@ -247,6 +260,7 @@ func toScoringTaskDetailDTO(video *model.Video, manual *model.ManualEvaluation, 
 			StudentName:   video.StudentName,
 			StudentNumber: video.StudentNumber,
 			Filename:      video.Filename,
+			OriginalFilename: video.OriginalFilename,
 			Status:        video.Status,
 		},
 		AIEvaluation: nil,

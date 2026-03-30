@@ -96,7 +96,7 @@ func (s *Service) Create(ctx context.Context, actor UserContext, input CreateUse
 		SchoolID:     input.SchoolID,
 	}
 
-	if actor.Role == "school_admin" {
+	if actor.Role == "school_admin" || actor.Role == "school_leader" {
 		user.SchoolID = actor.SchoolID
 	}
 
@@ -297,8 +297,8 @@ func validateManageRole(actor UserContext, role string, schoolID *uuid.UUID) err
 			return ErrSchoolIDRequired
 		}
 		return nil
-	case "school_admin":
-		if role == "admin" || role == "school_admin" {
+	case "school_admin", "school_leader":
+		if role == "admin" || role == "school_admin" || role == "school_leader" {
 			return ErrRoleNotAllowed
 		}
 		if actor.SchoolID == nil {
@@ -314,8 +314,8 @@ func ensureActorCanManageTarget(actor UserContext, target *model.User) error {
 	switch actor.Role {
 	case "admin":
 		return nil
-	case "school_admin":
-		if target.Role == "admin" || target.Role == "school_admin" {
+	case "school_admin", "school_leader":
+		if target.Role == "admin" || target.Role == "school_admin" || target.Role == "school_leader" {
 			return ErrRoleNotAllowed
 		}
 		if actor.SchoolID == nil || target.SchoolID == nil || *actor.SchoolID != *target.SchoolID {
@@ -343,7 +343,7 @@ func validateCreateUserInput(input CreateUserInput) error {
 
 func isValidRole(role string) bool {
 	switch role {
-	case "admin", "school_admin", "teacher", "scorer", "student":
+	case "admin", "school_admin", "school_leader", "teacher", "scorer", "student":
 		return true
 	default:
 		return false

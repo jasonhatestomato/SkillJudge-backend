@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # ====== 你的配置 ======
-AK="HPUANB4LLQ7LC5QK9DLX"
-SK="YXu5c5zzZy2ebwKstB9LxXB2bZQloJKvbctqmOuF"
+AK="HPUA7GKRJ3UZCI68D3JK"
+SK="bhENrYEPEumlTfPMdBEvjtzEgxb0QGeikmp7AZMe"
 
 HOST="iam.myhuaweicloud.com"
 ENDPOINT="https://${HOST}"
@@ -35,7 +35,7 @@ cat > sts-body.json <<'JSON'
               "obs:object:PutObject"
             ],
             "Resource": [
-              "obs:*:*:object:skilludge/*"
+              "obs:*:*:object:skilljudge-8af9/*"
             ]
           }
         ]

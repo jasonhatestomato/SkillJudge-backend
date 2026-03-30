@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"skilljudge/backend/internal/bootstrap"
 	"skilljudge/backend/internal/config"
@@ -24,6 +25,7 @@ import (
 
 type App struct {
 	engine *gin.Engine
+	host   string
 	port   string
 }
 
@@ -43,8 +45,12 @@ func New() (*App, error) {
 		return nil, fmt.Errorf("application startup aborted: %w", err)
 	}
 
-	if err := bootstrap.Run(routerContext(), db, cfg.Bootstrap); err != nil {
-		return nil, fmt.Errorf("application startup aborted: bootstrap failed: %w", err)
+	// Production-like environments should not mutate seeded RBAC data on every
+	// startup. Bootstrap is opt-in through BOOTSTRAP_ENABLED.
+	if cfg.Bootstrap.Enabled {
+		if err := bootstrap.Run(routerContext(), db, cfg.Bootstrap); err != nil {
+			return nil, fmt.Errorf("application startup aborted: bootstrap failed: %w", err)
+		}
 	}
 
 	userRepo := user.NewRepository(db)
@@ -72,12 +78,14 @@ func New() (*App, error) {
 	videoHandler := video.NewHandler(videoService)
 
 	router := gin.Default()
+	router.Use(corsMiddleware())
 	// Route registration stays centralized here so module wiring and
 	// permission boundaries can be audited from a single entry point.
 	registerRoutes(router, authService, userService, authHandler, systemHandler, userHandler, projectHandler, taskHandler, scoringHandler, videoHandler)
 
 	return &App{
 		engine: router,
+		host:   cfg.HTTP.Host,
 		port:   cfg.HTTP.Port,
 	}, nil
 }
@@ -86,8 +94,37 @@ func routerContext() context.Context {
 	return context.Background()
 }
 
+func corsMiddleware() gin.HandlerFunc {
+	allowedOrigins := map[string]struct{}{
+		"http://localhost:8081": {},
+		"http://127.0.0.1:8081": {},
+	}
+
+	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		if _, ok := allowedOrigins[origin]; ok {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
+			c.Header("Access-Control-Allow-Credentials", "true")
+			c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Requested-With")
+			c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		}
+
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Next()
+	}
+}
+
 func (a *App) Run() error {
-	return a.engine.Run(fmt.Sprintf(":%s", a.port))
+	addr := fmt.Sprintf(":%s", a.port)
+	if a.host != "" {
+		addr = fmt.Sprintf("%s:%s", a.host, a.port)
+	}
+	return a.engine.Run(addr)
 }
 
 func registerRoutes(router *gin.Engine, authService *auth.Service, userService *user.Service, authHandler *auth.Handler, systemHandler *system.Handler, userHandler *user.Handler, projectHandler *project.Handler, taskHandler *task.Handler, scoringHandler *scoring.Handler, videoHandler *video.Handler) {
@@ -112,14 +149,15 @@ func registerRoutes(router *gin.Engine, authService *auth.Service, userService *
 	projectGroup := api.Group("/projects", middleware.RequireAuth(authService))
 	projectGroup.POST("", middleware.RequirePermission(userService, "project:create"), projectHandler.Create)
 	projectGroup.GET("", middleware.RequirePermission(userService, "project:read"), projectHandler.List)
-	projectGroup.GET("/:id", middleware.RequirePermission(userService, "project:read"), projectHandler.Get)
-	projectGroup.PATCH("/:id", middleware.RequirePermission(userService, "project:update"), projectHandler.Update)
-	projectGroup.DELETE("/:id", middleware.RequirePermission(userService, "project:delete"), projectHandler.Delete)
 	projectGroup.POST("/:projectId/tasks", middleware.RequirePermission(userService, "task:create"), taskHandler.Create)
 	projectGroup.GET("/:projectId/tasks", middleware.RequirePermission(userService, "task:read"), taskHandler.ListByProject)
+	projectGroup.GET("/:projectId", middleware.RequirePermission(userService, "project:read"), projectHandler.Get)
+	projectGroup.PATCH("/:projectId", middleware.RequirePermission(userService, "project:update"), projectHandler.Update)
+	projectGroup.DELETE("/:projectId", middleware.RequirePermission(userService, "project:delete"), projectHandler.Delete)
 
 	taskGroup := api.Group("/tasks", middleware.RequireAuth(authService))
 	taskGroup.GET("/my", middleware.RequirePermission(userService, "task:read"), scoringHandler.ListMyTasks)
+	taskGroup.GET("/assignable-scorers", middleware.RequirePermission(userService, "task:update"), scoringHandler.ListAssignableScorers)
 	taskGroup.GET("/:id", middleware.RequirePermission(userService, "task:read"), func(c *gin.Context) {
 		actor := middleware.CurrentUser(c)
 		// Phase 1 keeps the API path in api.md, but scorers use this route as a

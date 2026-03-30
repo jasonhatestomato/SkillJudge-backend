@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	defaultHTTPHost           = ""
 	defaultHTTPPort           = "8080"
 	defaultAccessTokenTTL     = time.Hour
 	defaultRefreshTokenTTL    = 7 * 24 * time.Hour
@@ -36,6 +37,7 @@ type AppConfig struct {
 }
 
 type HTTPConfig struct {
+	Host string
 	Port string
 }
 
@@ -76,6 +78,7 @@ type StorageConfig struct {
 }
 
 type BootstrapConfig struct {
+	Enabled           bool
 	InitAdminUsername string
 	InitAdminPassword string
 	InitAdminRealName string
@@ -91,6 +94,7 @@ func Load() (Config, error) {
 			Env:  getEnv("APP_ENV", "development"),
 		},
 		HTTP: HTTPConfig{
+			Host: getEnv("HTTP_HOST", defaultHTTPHost),
 			Port: getEnv("HTTP_PORT", defaultHTTPPort),
 		},
 		DB: DBConfig{
@@ -126,6 +130,7 @@ func Load() (Config, error) {
 			STSTTL:          getEnvDuration("STORAGE_STS_TTL", defaultSTSTTL),
 		},
 		Bootstrap: BootstrapConfig{
+			Enabled:           getEnvBool("BOOTSTRAP_ENABLED", false),
 			InitAdminUsername: getEnv("INIT_ADMIN_USERNAME", "admin"),
 			InitAdminPassword: getEnv("INIT_ADMIN_PASSWORD", "Admin123456"),
 			InitAdminRealName: getEnv("INIT_ADMIN_REAL_NAME", "系统管理员"),
@@ -181,6 +186,22 @@ func getEnvInt(key string, fallback int) int {
 	}
 
 	return parsed
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	switch value {
+	case "1", "true", "TRUE", "True", "yes", "YES", "Yes", "on", "ON", "On":
+		return true
+	case "0", "false", "FALSE", "False", "no", "NO", "No", "off", "OFF", "Off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func getEnvDuration(key string, fallback time.Duration) time.Duration {

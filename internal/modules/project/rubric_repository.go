@@ -60,7 +60,7 @@ func (r *Repository) ListRubrics(ctx context.Context, params RubricListParams, a
 
 	switch actorRole {
 	case "admin":
-	case "school_admin":
+	case "school_admin", "school_leader":
 		if actorSchoolID != nil {
 			query = query.Where("(school_id = ? OR is_public = true)", *actorSchoolID)
 		} else {

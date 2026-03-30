@@ -171,7 +171,7 @@ func (r *Repository) List(ctx context.Context, params ListParams, actorRole stri
 		query = query.Where("users.username ILIKE ? OR users.real_name ILIKE ?", keyword, keyword)
 	}
 
-	if actorRole == "school_admin" && actorSchoolID != nil {
+	if (actorRole == "school_admin" || actorRole == "school_leader") && actorSchoolID != nil {
 		query = query.Where("users.school_id = ?", *actorSchoolID)
 	} else if params.SchoolID != nil {
 		query = query.Where("users.school_id = ?", *params.SchoolID)

@@ -60,6 +60,15 @@ type VideoOwnerDTO struct {
 	RealName *string   `json:"realName,omitempty"`
 }
 
+type VideoManualEvaluationDTO struct {
+	Score        *float64         `json:"score,omitempty"`
+	ScoreDetails []map[string]any `json:"scoreDetails,omitempty"`
+	Comments     *string          `json:"comments,omitempty"`
+	Status       string           `json:"status"`
+	StartedAt    *time.Time       `json:"startedAt,omitempty"`
+	SubmittedAt  *time.Time       `json:"submittedAt,omitempty"`
+}
+
 type VideoDetailDTO struct {
 	ID               uuid.UUID        `json:"id"`
 	Filename         string           `json:"filename"`
@@ -89,7 +98,7 @@ type VideoDetailDTO struct {
 	Scorer           *VideoOwnerDTO   `json:"scorer,omitempty"`
 	Task             *VideoTaskDTO    `json:"task,omitempty"`
 	AIEvaluation     any              `json:"aiEvaluation,omitempty"`
-	ManualEvaluation any              `json:"manualEvaluation,omitempty"`
+	ManualEvaluation *VideoManualEvaluationDTO `json:"manualEvaluation,omitempty"`
 }
 
 type Pagination struct {
@@ -149,7 +158,7 @@ func ToVideoListItemDTO(item *model.Video) VideoListItemDTO {
 	return dto
 }
 
-func ToVideoDetailDTO(item *model.Video, playURL *string) *VideoDetailDTO {
+func ToVideoDetailDTO(item *model.Video, playURL *string, manual *model.ManualEvaluation) *VideoDetailDTO {
 	dto := &VideoDetailDTO{
 		ID:               item.ID,
 		Filename:         item.Filename,
@@ -175,7 +184,6 @@ func ToVideoDetailDTO(item *model.Video, playURL *string) *VideoDetailDTO {
 		AIScore:          item.AIScore,
 		ManualScore:      item.ManualScore,
 		AIEvaluation:     nil,
-		ManualEvaluation: nil,
 	}
 
 	if item.Task != nil {
@@ -209,6 +217,16 @@ func ToVideoDetailDTO(item *model.Video, playURL *string) *VideoDetailDTO {
 			ID:       item.Scorer.ID,
 			Username: item.Scorer.Username,
 			RealName: item.Scorer.RealName,
+		}
+	}
+	if manual != nil {
+		dto.ManualEvaluation = &VideoManualEvaluationDTO{
+			Score:        manual.TotalScore,
+			ScoreDetails: manual.ScoreDetails,
+			Comments:     manual.Comments,
+			Status:       manual.Status,
+			StartedAt:    manual.StartedAt,
+			SubmittedAt:  manual.SubmittedAt,
 		}
 	}
 

@@ -47,7 +47,7 @@ func (s *Service) CreateRubric(ctx context.Context, actor user.UserContext, inpu
 	switch actor.Role {
 	case "admin":
 		schoolID = nil
-	case "school_admin", "teacher":
+	case "school_admin", "school_leader", "teacher":
 		if actor.SchoolID == nil {
 			return nil, ErrProjectSchoolRequired
 		}
@@ -227,7 +227,7 @@ func (s *Service) CreateRubricFromTemplate(ctx context.Context, actor user.UserC
 
 func canManageRubric(role string) bool {
 	switch role {
-	case "admin", "school_admin", "teacher":
+	case "admin", "school_admin", "school_leader", "teacher":
 		return true
 	default:
 		return false
@@ -242,7 +242,7 @@ func ensureActorCanAccessRubric(actor user.UserContext, item *model.ScoringRubri
 	switch actor.Role {
 	case "admin":
 		return nil
-	case "school_admin":
+	case "school_admin", "school_leader":
 		if actor.SchoolID == nil || item.SchoolID == nil || *actor.SchoolID != *item.SchoolID {
 			return ErrInvalidProjectScope
 		}
@@ -264,7 +264,7 @@ func ensureActorCanManageRubric(actor user.UserContext, item *model.ScoringRubri
 	switch actor.Role {
 	case "admin":
 		return nil
-	case "school_admin":
+	case "school_admin", "school_leader":
 		if actor.SchoolID == nil || item.SchoolID == nil || *actor.SchoolID != *item.SchoolID {
 			return ErrInvalidProjectScope
 		}

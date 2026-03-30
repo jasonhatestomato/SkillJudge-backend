@@ -2,6 +2,7 @@ package video
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -77,6 +78,7 @@ func (h *Handler) CreateUploadCredential(c *gin.Context) {
 		case errors.Is(err, ErrInvalidVideoScope), errors.Is(err, ErrRoleNotAllowed), errors.Is(err, task.ErrTaskProjectScope), errors.Is(err, task.ErrTaskRoleNotAllowed):
 			response.Error(c, http.StatusForbidden, err.Error(), nil)
 		default:
+			log.Printf("video.CreateUploadCredential failed: actor=%s task=%s filename=%q err=%v", actor.UserID, taskID, req.Filename, err)
 			response.Error(c, http.StatusInternalServerError, "failed to create upload credential", nil)
 		}
 		return

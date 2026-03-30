@@ -157,6 +157,11 @@ func (s *Service) ConfirmUpload(ctx context.Context, actor user.UserContext, vid
 	if err := s.repo.Update(ctx, item.ID, updates); err != nil {
 		return nil, err
 	}
+	if item.TaskID != nil {
+		if err := s.taskService.RefreshVideoStats(ctx, *item.TaskID); err != nil {
+			return nil, fmt.Errorf("refresh task video stats: %w", err)
+		}
+	}
 
 	updated, err := s.repo.FindByID(ctx, item.ID)
 	if err != nil {
@@ -168,7 +173,12 @@ func (s *Service) ConfirmUpload(ctx context.Context, actor user.UserContext, vid
 		return nil, err
 	}
 
-	return ToVideoDetailDTO(updated, playURL), nil
+	manual, err := s.repo.FindLatestManualEvaluation(ctx, updated.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ToVideoDetailDTO(updated, playURL, manual), nil
 }
 
 func (s *Service) List(ctx context.Context, actor user.UserContext, params ListParams) (*ListVideosResult, error) {
@@ -224,7 +234,12 @@ func (s *Service) GetByID(ctx context.Context, actor user.UserContext, videoID u
 		return nil, err
 	}
 
-	return ToVideoDetailDTO(item, playURL), nil
+	manual, err := s.repo.FindLatestManualEvaluation(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ToVideoDetailDTO(item, playURL, manual), nil
 }
 
 func (s *Service) Delete(ctx context.Context, actor user.UserContext, videoID uuid.UUID) error {
@@ -303,7 +318,7 @@ func detectFormat(filename string) *string {
 
 func canCreateVideo(role string) bool {
 	switch role {
-	case "admin", "school_admin", "teacher":
+	case "admin", "school_admin", "school_leader", "teacher":
 		return true
 	default:
 		return false
@@ -314,7 +329,7 @@ func ensureActorCanManageProject(actor user.UserContext, item *model.Project) er
 	switch actor.Role {
 	case "admin":
 		return nil
-	case "school_admin":
+	case "school_admin", "school_leader":
 		if actor.SchoolID == nil || item.SchoolID == nil || *actor.SchoolID != *item.SchoolID {
 			return ErrInvalidVideoScope
 		}
@@ -333,7 +348,7 @@ func ensureActorCanAccessProject(actor user.UserContext, item *model.Project) er
 	switch actor.Role {
 	case "admin":
 		return nil
-	case "school_admin", "scorer":
+	case "school_admin", "school_leader", "scorer":
 		if actor.SchoolID == nil || item.SchoolID == nil || *actor.SchoolID != *item.SchoolID {
 			return ErrInvalidVideoScope
 		}
@@ -349,16 +364,18 @@ func ensureActorCanAccessProject(actor user.UserContext, item *model.Project) er
 }
 
 func ensureActorCanAccessVideo(actor user.UserContext, item *model.Video) error {
+	derivedSchoolID := videoSchoolID(item)
+	derivedCreatorID := videoCreatorID(item)
 	switch actor.Role {
 	case "admin":
 		return nil
-	case "school_admin", "scorer":
-		if actor.SchoolID == nil || item.SchoolID == nil || *actor.SchoolID != *item.SchoolID {
+	case "school_admin", "school_leader", "scorer":
+		if actor.SchoolID == nil || derivedSchoolID == nil || *actor.SchoolID != *derivedSchoolID {
 			return ErrInvalidVideoScope
 		}
 		return nil
 	case "teacher":
-		if item.CreatorID == nil || *item.CreatorID != actor.UserID {
+		if derivedCreatorID == nil || *derivedCreatorID != actor.UserID {
 			return ErrInvalidVideoScope
 		}
 		return nil
@@ -368,16 +385,18 @@ func ensureActorCanAccessVideo(actor user.UserContext, item *model.Video) error 
 }
 
 func ensureActorCanManageVideo(actor user.UserContext, item *model.Video) error {
+	derivedSchoolID := videoSchoolID(item)
+	derivedCreatorID := videoCreatorID(item)
 	switch actor.Role {
 	case "admin":
 		return nil
-	case "school_admin":
-		if actor.SchoolID == nil || item.SchoolID == nil || *actor.SchoolID != *item.SchoolID {
+	case "school_admin", "school_leader":
+		if actor.SchoolID == nil || derivedSchoolID == nil || *actor.SchoolID != *derivedSchoolID {
 			return ErrInvalidVideoScope
 		}
 		return nil
 	case "teacher":
-		if item.CreatorID == nil || *item.CreatorID != actor.UserID {
+		if derivedCreatorID == nil || *derivedCreatorID != actor.UserID {
 			return ErrInvalidVideoScope
 		}
 		return nil
@@ -388,4 +407,30 @@ func ensureActorCanManageVideo(actor user.UserContext, item *model.Video) error 
 
 func stringPtr(value string) *string {
 	return &value
+}
+
+func videoSchoolID(item *model.Video) *uuid.UUID {
+	if item.SchoolID != nil {
+		return item.SchoolID
+	}
+	if item.Task != nil && item.Task.Project != nil {
+		return item.Task.Project.SchoolID
+	}
+	if item.Project != nil {
+		return item.Project.SchoolID
+	}
+	return nil
+}
+
+func videoCreatorID(item *model.Video) *uuid.UUID {
+	if item.CreatorID != nil {
+		return item.CreatorID
+	}
+	if item.Task != nil && item.Task.CreatorID != nil {
+		return item.Task.CreatorID
+	}
+	if item.Project != nil && item.Project.CreatorID != nil {
+		return item.Project.CreatorID
+	}
+	return nil
 }

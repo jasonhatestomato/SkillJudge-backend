@@ -56,6 +56,27 @@ func (r *Repository) FindAssignableScorers(ctx context.Context, schoolID *uuid.U
 	return users, nil
 }
 
+func (r *Repository) ListAssignableScorers(ctx context.Context, schoolID *uuid.UUID) ([]model.User, error) {
+	query := r.db.WithContext(ctx).
+		Model(&model.User{}).
+		Select("DISTINCT users.*").
+		Joins("join user_roles on user_roles.user_id = users.id and user_roles.status = ?", "active").
+		Joins("join roles on roles.id = user_roles.role_id and roles.status = ?", "active").
+		Where("users.status = ?", "active").
+		Where("roles.code = ?", "scorer")
+
+	if schoolID != nil {
+		query = query.Where("users.school_id = ?", *schoolID)
+	}
+
+	var users []model.User
+	if err := query.Order("users.real_name ASC NULLS LAST, users.username ASC").Find(&users).Error; err != nil {
+		return nil, err
+	}
+
+	return users, nil
+}
+
 func (r *Repository) AssignScorers(ctx context.Context, assignments map[uuid.UUID]uuid.UUID, assignedAt time.Time) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for videoID, scorerID := range assignments {

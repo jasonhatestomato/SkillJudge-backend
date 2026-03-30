@@ -75,6 +75,7 @@
 
 - `admin` 可跨校管理全部资源
 - `school_admin` 只能管理本校资源
+- `school_leader` 当前按学校负责人角色处理，权限边界与 `school_admin` 一致
 - `teacher` 主要管理自己创建的项目、批次、评分细则与视频
 - `scorer` 主要执行评分
 - `student` 当前基本未展开
@@ -98,7 +99,7 @@
 - [`internal/config/`](/Users/jason/go/src/SkillJudge/backend/internal/config)
   - 配置读取
 - [`internal/bootstrap/`](/Users/jason/go/src/SkillJudge/backend/internal/bootstrap)
-  - 启动种子与默认管理员初始化
+  - 启动种子与默认管理员初始化（默认关闭，需显式开启）
 - [`internal/model/models.go`](/Users/jason/go/src/SkillJudge/backend/internal/model/models.go)
   - GORM 模型
 - [`internal/http/middleware/`](/Users/jason/go/src/SkillJudge/backend/internal/http/middleware)
@@ -295,6 +296,12 @@ STS 返回结构：
 ## 11. 本地运行
 
 程序会自动读取根目录下的 [`.env`](/Users/jason/go/src/SkillJudge/backend/.env)。
+
+Bootstrap 约定：
+
+- 当前 `BOOTSTRAP_ENABLED` 默认应保持为 `false`
+- 只有在明确需要初始化内置角色、权限、默认管理员时，才临时设置为 `true`
+- 对已经由数据库负责人维护正式数据的环境，不应在日常启动时开启 bootstrap seed
 
 示例配置：
 

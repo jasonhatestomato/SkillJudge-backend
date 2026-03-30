@@ -53,7 +53,7 @@ func (s *Service) Create(ctx context.Context, actor user.UserContext, input Crea
 
 	projectSchoolID := input.SchoolID
 	switch actor.Role {
-	case "teacher", "school_admin":
+	case "teacher", "school_admin", "school_leader":
 		if actor.SchoolID == nil {
 			return nil, ErrProjectSchoolRequired
 		}
@@ -227,7 +227,7 @@ func (s *Service) Delete(ctx context.Context, actor user.UserContext, id uuid.UU
 
 func canCreateProject(role string) bool {
 	switch role {
-	case "admin", "school_admin", "teacher":
+	case "admin", "school_admin", "school_leader", "teacher":
 		return true
 	default:
 		return false
@@ -247,7 +247,7 @@ func ensureActorCanAccessProject(actor user.UserContext, item *model.Project) er
 	switch actor.Role {
 	case "admin":
 		return nil
-	case "school_admin":
+	case "school_admin", "school_leader":
 		if actor.SchoolID == nil || item.SchoolID == nil || *actor.SchoolID != *item.SchoolID {
 			return ErrInvalidProjectScope
 		}

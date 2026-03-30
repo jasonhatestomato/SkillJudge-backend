@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"skilljudge/backend/internal/model"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -28,7 +30,17 @@ func NewRepository(db *gorm.DB) *Repository {
 }
 
 func (r *Repository) Create(ctx context.Context, item *model.Task) error {
-	return r.db.WithContext(ctx).Create(item).Error
+	err := r.db.WithContext(ctx).Create(item).Error
+	if err == nil {
+		return nil
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return ErrTaskNameConflict
+	}
+
+	return err
 }
 
 func (r *Repository) FindByID(ctx context.Context, id uuid.UUID) (*model.Task, error) {
@@ -68,6 +80,49 @@ func (r *Repository) List(ctx context.Context, params ListParams) ([]model.Task,
 	return items, total, nil
 }
 
+func (r *Repository) RefreshVideoStats(ctx context.Context, taskID uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var taskItem model.Task
+		if err := tx.Model(&model.Task{}).
+			Select("id", "project_id").
+			Where("id = ?", taskID).
+			First(&taskItem).Error; err != nil {
+			return err
+		}
+
+		taskTotal, taskCompleted, err := countTaskVideoStats(tx, taskID)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now()
+		taskUpdates := map[string]any{
+			"total_videos":     taskTotal,
+			"completed_videos": taskCompleted,
+			"updated_at":       now,
+		}
+		if err := tx.Model(&model.Task{}).Where("id = ?", taskID).Updates(taskUpdates).Error; err != nil {
+			return err
+		}
+
+		projectTotal, projectCompleted, err := countProjectVideoStats(tx, taskItem.ProjectID)
+		if err != nil {
+			return err
+		}
+
+		projectUpdates := map[string]any{
+			"total_videos":     projectTotal,
+			"completed_videos": projectCompleted,
+			"updated_at":       now,
+		}
+		if err := tx.Model(&model.Project{}).Where("id = ?", taskItem.ProjectID).Updates(projectUpdates).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+}
+
 func (r *Repository) baseQuery(ctx context.Context) *gorm.DB {
 	return r.db.WithContext(ctx).
 		Model(&model.Task{}).
@@ -75,4 +130,49 @@ func (r *Repository) baseQuery(ctx context.Context) *gorm.DB {
 		Preload("Project.School").
 		Preload("Rubric").
 		Preload("Creator")
+}
+
+func countTaskVideoStats(db *gorm.DB, taskID uuid.UUID) (int64, int64, error) {
+	var total int64
+	if err := db.Model(&model.Video{}).
+		Where("task_id = ?", taskID).
+		Where("status = ?", "ready").
+		Count(&total).Error; err != nil {
+		return 0, 0, err
+	}
+
+	var completed int64
+	if err := db.Model(&model.Video{}).
+		Where("task_id = ?", taskID).
+		Where("status = ?", "ready").
+		Where("evaluation_status = ?", "completed").
+		Count(&completed).Error; err != nil {
+		return 0, 0, err
+	}
+
+	return total, completed, nil
+}
+
+func countProjectVideoStats(db *gorm.DB, projectID uuid.UUID) (int64, int64, error) {
+	projectVideos := db.Model(&model.Video{}).
+		Joins("JOIN tasks ON tasks.id = videos.task_id").
+		Where("tasks.project_id = ?", projectID).
+		Where("videos.status = ?", "ready")
+
+	var total int64
+	if err := projectVideos.Count(&total).Error; err != nil {
+		return 0, 0, err
+	}
+
+	var completed int64
+	if err := db.Model(&model.Video{}).
+		Joins("JOIN tasks ON tasks.id = videos.task_id").
+		Where("tasks.project_id = ?", projectID).
+		Where("videos.status = ?", "ready").
+		Where("videos.evaluation_status = ?", "completed").
+		Count(&completed).Error; err != nil {
+		return 0, 0, err
+	}
+
+	return total, completed, nil
 }

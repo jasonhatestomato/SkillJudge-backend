@@ -181,9 +181,17 @@ func (s *Service) ResolveManageable(ctx context.Context, actor user.UserContext,
 	return s.Resolve(ctx, actor, taskID, AccessManage)
 }
 
+func (s *Service) RefreshVideoStats(ctx context.Context, taskID uuid.UUID) error {
+	if taskID == uuid.Nil {
+		return ErrTaskNotFound
+	}
+
+	return s.repo.RefreshVideoStats(ctx, taskID)
+}
+
 func canManageTask(role string) bool {
 	switch role {
-	case "admin", "school_admin", "teacher":
+	case "admin", "school_admin", "school_leader", "teacher":
 		return true
 	default:
 		return false
@@ -194,7 +202,7 @@ func ensureActorCanManageProject(actor user.UserContext, item *model.Project) er
 	switch actor.Role {
 	case "admin":
 		return nil
-	case "school_admin":
+	case "school_admin", "school_leader":
 		if actor.SchoolID == nil || item.SchoolID == nil || *actor.SchoolID != *item.SchoolID {
 			return ErrTaskProjectScope
 		}
@@ -213,7 +221,7 @@ func ensureActorCanAccessProject(actor user.UserContext, item *model.Project) er
 	switch actor.Role {
 	case "admin":
 		return nil
-	case "school_admin", "scorer":
+	case "school_admin", "school_leader", "scorer":
 		if actor.SchoolID == nil || item.SchoolID == nil || *actor.SchoolID != *item.SchoolID {
 			return ErrTaskProjectScope
 		}

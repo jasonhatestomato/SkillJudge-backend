@@ -115,6 +115,8 @@ SkillJudge 后端当前处于 `Phase 1`，目标是先完成最小可运行主�
 - Redis 会话 key：`session:{userId}:{sessionId}`
 - 运行时权限读取已切到：
   - `user_roles -> role_permissions -> permissions`
+- 当前数据库里的学校负责人角色使用 `school_leader`
+- 后端实现中 `school_leader` 与 `school_admin` 按同一学校级管理边界处理
 
 视频上传：
 
@@ -142,6 +144,12 @@ SkillJudge 后端当前处于 `Phase 1`，目标是先完成最小可运行主�
 ## 本地开发
 
 程序启动时会自动读取项目根目录下的 [`.env`](/Users/jason/go/src/SkillJudge/backend/.env)。
+
+Bootstrap 约定：
+
+- 当前 `BOOTSTRAP_ENABLED` 默认应保持为 `false`
+- 只有在明确需要初始化内置角色、权限、默认管理员时，才临时设置为 `true`
+- 如果数据库已经由专人维护正式基础数据，日常启动不要开启 bootstrap seed
 
 示例模板：
 

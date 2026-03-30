@@ -147,7 +147,7 @@ func (h *Handler) List(c *gin.Context) {
 
 func (h *Handler) Get(c *gin.Context) {
 	actor := middleware.CurrentUser(c)
-	projectID, err := uuid.Parse(c.Param("id"))
+	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid project id", nil)
 		return
@@ -171,7 +171,7 @@ func (h *Handler) Get(c *gin.Context) {
 
 func (h *Handler) Update(c *gin.Context) {
 	actor := middleware.CurrentUser(c)
-	projectID, err := uuid.Parse(c.Param("id"))
+	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid project id", nil)
 		return
@@ -214,7 +214,7 @@ func (h *Handler) Update(c *gin.Context) {
 
 func (h *Handler) Delete(c *gin.Context) {
 	actor := middleware.CurrentUser(c)
-	projectID, err := uuid.Parse(c.Param("id"))
+	projectID, err := uuid.Parse(c.Param("projectId"))
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid project id", nil)
 		return

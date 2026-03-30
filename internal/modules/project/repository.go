@@ -90,7 +90,7 @@ func (r *Repository) List(ctx context.Context, params ListParams, actorRole stri
 		if params.CreatorID != nil {
 			query = query.Where("creator_id = ?", *params.CreatorID)
 		}
-	case "school_admin":
+	case "school_admin", "school_leader":
 		if actorSchoolID != nil {
 			query = query.Where("school_id = ?", *actorSchoolID)
 		}

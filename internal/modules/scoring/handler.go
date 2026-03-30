@@ -129,6 +129,23 @@ func (h *Handler) ListMyTasks(c *gin.Context) {
 	response.Success(c, http.StatusOK, result)
 }
 
+func (h *Handler) ListAssignableScorers(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+
+	result, err := h.service.ListAssignableScorers(c.Request.Context(), actor)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrAssignmentRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to list assignable scorers", nil)
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, result)
+}
+
 func (h *Handler) AssignScorers(c *gin.Context) {
 	actor := middleware.CurrentUser(c)
 	taskID, err := uuid.Parse(c.Param("id"))

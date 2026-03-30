@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -55,8 +56,8 @@ var defaultRoleSeeds = []roleSeed{
 		},
 	},
 	{
-		Name:        "校长",
-		Code:        "principal",
+		Name:        "校领导",
+		Code:        "school_leader",
 		Description: "学校负责人，当前权限与学校管理员一致",
 		ScopeType:   "school",
 		IsBuiltin:   true,
@@ -142,11 +143,15 @@ func seedRBAC(ctx context.Context, db *gorm.DB) error {
 		case err != nil:
 			return fmt.Errorf("find role %s: %w", item.Code, err)
 		default:
+			legacyPermissions, err := json.Marshal(item.Permissions)
+			if err != nil {
+				return fmt.Errorf("marshal legacy permissions for %s: %w", item.Code, err)
+			}
 			updates := map[string]any{
 				"name": item.Name,
 				// Keep the legacy JSON field in sync for compatibility, even though
 				// runtime permission checks now read from role_permissions.
-				"permissions":    item.Permissions,
+				"permissions":    string(legacyPermissions),
 				"scope_type":     item.ScopeType,
 				"is_builtin":     item.IsBuiltin,
 				"is_super_admin": item.IsSuperAdmin,

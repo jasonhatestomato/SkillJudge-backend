@@ -59,6 +59,28 @@ func (s *Service) ListMyTasks(ctx context.Context, actor user.UserContext, param
 	}, nil
 }
 
+func (s *Service) ListAssignableScorers(ctx context.Context, actor user.UserContext) (*AssignableScorersResult, error) {
+	if !canAssignScorers(actor.Role) {
+		return nil, ErrAssignmentRoleNotAllowed
+	}
+
+	scorers, err := s.repo.ListAssignableScorers(ctx, actor.SchoolID)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]AssignableScorerDTO, 0, len(scorers))
+	for _, scorer := range scorers {
+		items = append(items, AssignableScorerDTO{
+			ID:       scorer.ID,
+			Username: scorer.Username,
+			RealName: scorer.RealName,
+		})
+	}
+
+	return &AssignableScorersResult{Items: items}, nil
+}
+
 func (s *Service) GetTaskDetail(ctx context.Context, actor user.UserContext, id uuid.UUID) (*ScoringTaskDetailDTO, error) {
 	// The API path keeps task semantics from api.md, but the concrete identifier
 	// here is the assigned video ID that the scorer is expected to review.
@@ -118,6 +140,9 @@ func (s *Service) SubmitTask(ctx context.Context, actor user.UserContext, id uui
 	// durable scoring detail payload and timestamps.
 	manual, err := s.repo.SubmitManualEvaluation(ctx, item, input, now)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.taskService.RefreshVideoStats(ctx, *item.TaskID); err != nil {
 		return nil, err
 	}
 
@@ -229,7 +254,7 @@ func validateAssignScorersInput(input AssignScorersInput) error {
 
 func canAssignScorers(role string) bool {
 	switch role {
-	case "admin", "school_admin", "teacher":
+	case "admin", "school_admin", "school_leader", "teacher":
 		return true
 	default:
 		return false
