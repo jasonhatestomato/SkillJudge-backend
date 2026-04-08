@@ -2,13 +2,17 @@ package video
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"math"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"skilljudge/backend/internal/model"
+	"skilljudge/backend/internal/modules/ai"
 	"skilljudge/backend/internal/modules/project"
 	"skilljudge/backend/internal/modules/scoring"
 	"skilljudge/backend/internal/modules/task"
@@ -20,6 +24,7 @@ import (
 
 type Service struct {
 	repo        *Repository
+	aiService   *ai.Service
 	projectRepo *project.Repository
 	taskService *task.Service
 	storage     storage.Provider
@@ -39,9 +44,12 @@ type ConfirmUploadInput struct {
 	Parts    []storage.UploadedPart `json:"parts"`
 }
 
-func NewService(repo *Repository, projectRepo *project.Repository, taskService *task.Service, provider storage.Provider) *Service {
+var filenameStudentIDPattern = regexp.MustCompile(`^(.*)_([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`)
+
+func NewService(repo *Repository, aiService *ai.Service, projectRepo *project.Repository, taskService *task.Service, provider storage.Provider) *Service {
 	return &Service{
 		repo:        repo,
+		aiService:   aiService,
 		projectRepo: projectRepo,
 		taskService: taskService,
 		storage:     provider,
@@ -60,6 +68,8 @@ func (s *Service) CreateUploadCredential(ctx context.Context, actor user.UserCon
 	if err != nil {
 		return nil, err
 	}
+
+	resolvedStudentID, resolvedStudentName, resolvedStudentNumber := resolveStudentIdentity(input)
 
 	videoID := uuid.New()
 	// Video storage now follows the project -> task -> video hierarchy so later
@@ -81,9 +91,9 @@ func (s *Service) CreateUploadCredential(ctx context.Context, actor user.UserCon
 		ProjectID:        resolvedTask.ProjectID,
 		TaskID:           &resolvedTask.TaskID,
 		SchoolID:         resolvedTask.SchoolID,
-		StudentID:        input.StudentID,
-		StudentName:      strings.TrimSpace(input.StudentName),
-		StudentNumber:    strings.TrimSpace(input.StudentNumber),
+		StudentID:        resolvedStudentID,
+		StudentName:      resolvedStudentName,
+		StudentNumber:    resolvedStudentNumber,
 		Filename:         sanitizeFilename(input.Filename),
 		OriginalFilename: stringPtr(strings.TrimSpace(input.Filename)),
 		FileSize:         input.FileSize,
@@ -168,6 +178,21 @@ func (s *Service) ConfirmUpload(ctx context.Context, actor user.UserContext, vid
 		return nil, err
 	}
 
+	if s.aiService != nil && s.aiService.Configured() {
+		if _, err := s.aiService.CreateForVideo(ctx, actor, updated.ID, false); err != nil &&
+			!errors.Is(err, ai.ErrEvaluationAlreadyProcessing) &&
+			!errors.Is(err, ai.ErrEvaluationForceRequired) {
+			log.Printf("video.ConfirmUpload auto ai trigger failed: actor=%s video=%s err=%v", actor.UserID, updated.ID, err)
+		}
+		refreshed, refreshErr := s.repo.FindByID(ctx, item.ID)
+		if refreshErr != nil {
+			return nil, refreshErr
+		}
+		if refreshed != nil {
+			updated = refreshed
+		}
+	}
+
 	playURL, err := s.playURL(ctx, updated)
 	if err != nil {
 		return nil, err
@@ -178,7 +203,12 @@ func (s *Service) ConfirmUpload(ctx context.Context, actor user.UserContext, vid
 		return nil, err
 	}
 
-	return ToVideoDetailDTO(updated, playURL, manual), nil
+	aiEvaluation, err := s.latestAIEvaluation(ctx, updated.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ToVideoDetailDTO(updated, playURL, manual, aiEvaluation), nil
 }
 
 func (s *Service) List(ctx context.Context, actor user.UserContext, params ListParams) (*ListVideosResult, error) {
@@ -195,6 +225,42 @@ func (s *Service) List(ctx context.Context, actor user.UserContext, params ListP
 	if _, err := s.taskService.ResolveReadable(ctx, actor, *params.TaskID); err != nil {
 		return nil, err
 	}
+
+	items, total, err := s.repo.List(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]VideoListItemDTO, 0, len(items))
+	for i := range items {
+		result = append(result, ToVideoListItemDTO(&items[i]))
+	}
+
+	return &ListVideosResult{
+		Items: result,
+		Pagination: Pagination{
+			Page:       params.Page,
+			PageSize:   params.PageSize,
+			Total:      total,
+			TotalPages: int(math.Ceil(float64(total) / float64(params.PageSize))),
+		},
+	}, nil
+}
+
+func (s *Service) ListMine(ctx context.Context, actor user.UserContext, params ListParams) (*ListVideosResult, error) {
+	if actor.Role != "student" {
+		return nil, ErrRoleNotAllowed
+	}
+	if params.Page <= 0 {
+		params.Page = 1
+	}
+	if params.PageSize <= 0 {
+		params.PageSize = 20
+	}
+
+	params.StudentID = &actor.UserID
+	params.TaskID = nil
+	params.ProjectID = uuid.Nil
 
 	items, total, err := s.repo.List(ctx, params)
 	if err != nil {
@@ -239,7 +305,46 @@ func (s *Service) GetByID(ctx context.Context, actor user.UserContext, videoID u
 		return nil, err
 	}
 
-	return ToVideoDetailDTO(item, playURL, manual), nil
+	aiEvaluation, err := s.latestAIEvaluation(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ToVideoDetailDTO(item, playURL, manual, aiEvaluation), nil
+}
+
+func (s *Service) GetMineByID(ctx context.Context, actor user.UserContext, videoID uuid.UUID) (*VideoDetailDTO, error) {
+	if actor.Role != "student" {
+		return nil, ErrRoleNotAllowed
+	}
+
+	item, err := s.repo.FindByID(ctx, videoID)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return nil, ErrVideoNotFound
+	}
+	if item.StudentID == nil || *item.StudentID != actor.UserID {
+		return nil, ErrInvalidVideoScope
+	}
+
+	playURL, err := s.playURL(ctx, item)
+	if err != nil {
+		return nil, err
+	}
+
+	manual, err := s.repo.FindLatestManualEvaluation(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	aiEvaluation, err := s.latestAIEvaluation(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ToVideoDetailDTO(item, playURL, manual, aiEvaluation), nil
 }
 
 func (s *Service) Delete(ctx context.Context, actor user.UserContext, videoID uuid.UUID) error {
@@ -325,6 +430,57 @@ func canCreateVideo(role string) bool {
 	}
 }
 
+func resolveStudentIdentity(input CreateUploadCredentialInput) (*uuid.UUID, string, string) {
+	studentID := input.StudentID
+	studentName := strings.TrimSpace(input.StudentName)
+	studentNumber := strings.TrimSpace(input.StudentNumber)
+
+	filenameTitle := strings.TrimSpace(strings.TrimSuffix(input.Filename, filepath.Ext(input.Filename)))
+	if studentID == nil {
+		if parsedName, parsedID, ok := parseStudentIdentityFromTitle(filenameTitle); ok {
+			studentID = &parsedID
+			if studentName == "" || studentName == filenameTitle {
+				studentName = parsedName
+			}
+		}
+	}
+
+	if studentName == "" {
+		studentName = filenameTitle
+	}
+	if studentNumber == "" {
+		studentNumber = studentName
+	}
+
+	return studentID, studentName, studentNumber
+}
+
+func parseStudentIdentityFromTitle(title string) (string, uuid.UUID, bool) {
+	matches := filenameStudentIDPattern.FindStringSubmatch(strings.TrimSpace(title))
+	if len(matches) != 3 {
+		return "", uuid.Nil, false
+	}
+
+	studentID, err := uuid.Parse(matches[2])
+	if err != nil {
+		return "", uuid.Nil, false
+	}
+
+	studentName := strings.TrimSpace(matches[1])
+	if studentName == "" {
+		return "", uuid.Nil, false
+	}
+
+	return studentName, studentID, true
+}
+
+func (s *Service) latestAIEvaluation(ctx context.Context, videoID uuid.UUID) (*ai.EmbeddedEvaluationDTO, error) {
+	if s.aiService == nil {
+		return nil, nil
+	}
+	return s.aiService.GetLatestForVideo(ctx, videoID)
+}
+
 func ensureActorCanManageProject(actor user.UserContext, item *model.Project) error {
 	switch actor.Role {
 	case "admin":
@@ -376,6 +532,11 @@ func ensureActorCanAccessVideo(actor user.UserContext, item *model.Video) error 
 		return nil
 	case "teacher":
 		if derivedCreatorID == nil || *derivedCreatorID != actor.UserID {
+			return ErrInvalidVideoScope
+		}
+		return nil
+	case "student":
+		if item.StudentID == nil || *item.StudentID != actor.UserID {
 			return ErrInvalidVideoScope
 		}
 		return nil

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"skilljudge/backend/internal/model"
+	"skilljudge/backend/internal/modules/ai"
 	"skilljudge/backend/internal/modules/task"
 	"skilljudge/backend/internal/modules/user"
 	"skilljudge/backend/internal/platform/storage"
@@ -17,12 +18,13 @@ import (
 
 type Service struct {
 	repo        *Repository
+	aiService   *ai.Service
 	taskService *task.Service
 	storage     storage.Provider
 }
 
-func NewService(repo *Repository, taskService *task.Service, storageProvider storage.Provider) *Service {
-	return &Service{repo: repo, taskService: taskService, storage: storageProvider}
+func NewService(repo *Repository, aiService *ai.Service, taskService *task.Service, storageProvider storage.Provider) *Service {
+	return &Service{repo: repo, aiService: aiService, taskService: taskService, storage: storageProvider}
 }
 
 func (s *Service) ListMyTasks(ctx context.Context, actor user.UserContext, params MyTasksListParams) (*MyTasksResult, error) {
@@ -96,6 +98,10 @@ func (s *Service) GetTaskDetail(ctx context.Context, actor user.UserContext, id 
 	if err != nil {
 		return nil, err
 	}
+	aiEvaluation, err := s.latestAIEvaluation(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
 
 	var playURL *string
 	if s.storage != nil && item.StoragePath != nil && *item.StoragePath != "" {
@@ -106,7 +112,7 @@ func (s *Service) GetTaskDetail(ctx context.Context, actor user.UserContext, id 
 		playURL = &generated
 	}
 
-	return toScoringTaskDetailDTO(item, manualEvaluation, playURL), nil
+	return toScoringTaskDetailDTO(item, manualEvaluation, aiEvaluation, playURL), nil
 }
 
 func (s *Service) SubmitTask(ctx context.Context, actor user.UserContext, id uuid.UUID, input SubmitTaskInput) (*SubmitTaskResult, error) {
@@ -124,7 +130,7 @@ func (s *Service) SubmitTask(ctx context.Context, actor user.UserContext, id uui
 	if item == nil || item.ScorerID == nil || item.TaskID == nil {
 		return nil, ErrScoringTaskNotFound
 	}
-	if item.EvaluationStatus == VideoEvaluationStatusCompleted || item.ManualStatus == VideoManualStatusCompleted {
+	if item.EvaluationStatus == VideoEvaluationStatusCompleted || item.ManualStatus == VideoManualStatusSubmitted {
 		return nil, ErrScoringTaskCompleted
 	}
 
@@ -147,7 +153,7 @@ func (s *Service) SubmitTask(ctx context.Context, actor user.UserContext, id uui
 	}
 
 	item.ManualScore = &input.TotalScore
-	item.ManualStatus = VideoManualStatusCompleted
+	item.ManualStatus = VideoManualStatusSubmitted
 	item.EvaluationStatus = VideoEvaluationStatusCompleted
 	item.CompletedAt = &now
 
@@ -225,6 +231,13 @@ func (s *Service) AssignScorers(ctx context.Context, actor user.UserContext, inp
 	}, nil
 }
 
+func (s *Service) latestAIEvaluation(ctx context.Context, videoID uuid.UUID) (*ai.EmbeddedEvaluationDTO, error) {
+	if s.aiService == nil {
+		return nil, nil
+	}
+	return s.aiService.GetLatestForVideo(ctx, videoID)
+}
+
 func validateAssignScorersInput(input AssignScorersInput) error {
 	if input.TaskID == uuid.Nil {
 		return task.ErrTaskNotFound
@@ -275,7 +288,7 @@ func validateAssignableVideos(videos []model.Video) error {
 		if item.Status != "ready" {
 			return ErrAssignmentVideoNotReady
 		}
-		if item.EvaluationStatus == VideoEvaluationStatusCompleted || item.ManualStatus == VideoManualStatusCompleted {
+		if item.EvaluationStatus == VideoEvaluationStatusCompleted || item.ManualStatus == VideoManualStatusSubmitted {
 			return ErrAssignmentVideoCompleted
 		}
 	}

@@ -9,7 +9,7 @@ const (
 const (
 	VideoManualStatusPending    = "pending"
 	VideoManualStatusInProgress = "in_progress"
-	VideoManualStatusCompleted  = "completed"
+	VideoManualStatusSubmitted  = "submitted"
 )
 
 const (

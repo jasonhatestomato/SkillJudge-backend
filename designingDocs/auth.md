@@ -250,11 +250,30 @@ Response:
   "data": {...}  // 创建的用户信息
 }
 批量导入用户
-POST /api/v1/users/batch-import
+POST /api/v1/users/batch
 Authorization: Bearer {token}
-Content-Type: multipart/form-data
+Content-Type: application/json
 
-file: users.xlsx
+{
+  "items": [
+    {
+      "row": 2,
+      "username": "scorer001",
+      "password": "initialPassword",
+      "email": "scorer@example.com",
+      "realName": "评分员A",
+      "role": "scorer",
+      "schoolId": "uuid"
+    }
+  ]
+}
+
+说明：
+- 前端负责解析用户表格，再将用户数组通过 JSON 发送给后端
+- `row` 为可选字段，用于回传错误定位
+- 字段定义与单用户创建尽量保持一致
+- `admin` 创建非 `admin` 用户时必须提供 `schoolId`
+- `school_admin` / `school_leader` 创建用户时可省略 `schoolId`，后端会自动使用当前操作者学校
 
 Response:
 {

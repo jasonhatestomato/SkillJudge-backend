@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -27,6 +28,17 @@ type CreateUserInput struct {
 	Phone    *string
 	Role     string
 	SchoolID *uuid.UUID
+}
+
+type BatchCreateUserInput struct {
+	Row      *int
+	Username string
+	Password string
+	Email    *string
+	RealName *string
+	Phone    *string
+	Role     string
+	SchoolID *string
 }
 
 type UpdateProfileInput struct {
@@ -57,6 +69,59 @@ func NewService(repo *Repository) *Service {
 }
 
 func (s *Service) Create(ctx context.Context, actor UserContext, input CreateUserInput) (*UserDTO, error) {
+	return s.createOne(ctx, actor, input)
+}
+
+func (s *Service) BatchCreate(ctx context.Context, actor UserContext, inputs []BatchCreateUserInput) (*BatchCreateUsersResult, error) {
+	if len(inputs) == 0 {
+		return nil, ErrBatchCreateItemsRequired
+	}
+
+	duplicateUsernames := findDuplicateBatchCreateUsernames(inputs)
+	result := &BatchCreateUsersResult{
+		Total: len(inputs),
+	}
+
+	for _, item := range inputs {
+		if _, duplicated := duplicateUsernames[item.Username]; duplicated {
+			result.Errors = append(result.Errors, BatchCreateUserError{
+				Row:      cloneOptionalInt(item.Row),
+				Username: item.Username,
+				Error:    "duplicate username in request",
+			})
+			continue
+		}
+
+		createInput, err := item.toCreateUserInput()
+		if err != nil {
+			result.Errors = append(result.Errors, BatchCreateUserError{
+				Row:      cloneOptionalInt(item.Row),
+				Username: item.Username,
+				Error:    err.Error(),
+			})
+			continue
+		}
+
+		if _, err := s.createOne(ctx, actor, createInput); err != nil {
+			if !isBatchCreateRecoverableError(err) {
+				return nil, err
+			}
+			result.Errors = append(result.Errors, BatchCreateUserError{
+				Row:      cloneOptionalInt(item.Row),
+				Username: item.Username,
+				Error:    err.Error(),
+			})
+			continue
+		}
+
+		result.Success++
+	}
+
+	result.Failed = len(result.Errors)
+	return result, nil
+}
+
+func (s *Service) createOne(ctx context.Context, actor UserContext, input CreateUserInput) (*UserDTO, error) {
 	if err := validateCreateUserInput(input); err != nil {
 		return nil, err
 	}
@@ -339,6 +404,71 @@ func validateCreateUserInput(input CreateUserInput) error {
 	}
 
 	return nil
+}
+
+func (input BatchCreateUserInput) toCreateUserInput() (CreateUserInput, error) {
+	result := CreateUserInput{
+		Username: input.Username,
+		Password: input.Password,
+		Email:    input.Email,
+		RealName: input.RealName,
+		Phone:    input.Phone,
+		Role:     input.Role,
+	}
+
+	if input.SchoolID == nil || *input.SchoolID == "" {
+		return result, nil
+	}
+
+	schoolID, err := uuid.Parse(*input.SchoolID)
+	if err != nil {
+		return CreateUserInput{}, errors.New("invalid schoolId")
+	}
+	result.SchoolID = &schoolID
+
+	return result, nil
+}
+
+func findDuplicateBatchCreateUsernames(inputs []BatchCreateUserInput) map[string]struct{} {
+	counts := make(map[string]int, len(inputs))
+	for _, item := range inputs {
+		counts[item.Username]++
+	}
+
+	duplicates := make(map[string]struct{})
+	for username, count := range counts {
+		if count > 1 {
+			duplicates[username] = struct{}{}
+		}
+	}
+
+	return duplicates
+}
+
+func isBatchCreateRecoverableError(err error) bool {
+	switch {
+	case errors.Is(err, ErrInvalidUsername),
+		errors.Is(err, ErrInvalidPassword),
+		errors.Is(err, ErrInvalidRole),
+		errors.Is(err, ErrRoleNotAllowed),
+		errors.Is(err, ErrBatchCreateItemsRequired),
+		errors.Is(err, ErrSchoolIDRequired),
+		errors.Is(err, ErrForbiddenSchoolScope),
+		errors.Is(err, ErrRoleNotFound),
+		errors.Is(err, ErrUsernameTaken):
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneOptionalInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+
+	cloned := *value
+	return &cloned
 }
 
 func isValidRole(role string) bool {

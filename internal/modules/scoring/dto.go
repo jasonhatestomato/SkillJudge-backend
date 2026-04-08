@@ -82,14 +82,14 @@ type MyTaskTaskDTO struct {
 }
 
 type MyTaskVideoDTO struct {
-	ID            uuid.UUID `json:"id"`
-	Filename      string    `json:"filename"`
-	OriginalFilename *string `json:"originalFilename,omitempty"`
-	StudentName   string    `json:"studentName"`
-	StudentNumber string    `json:"studentNumber"`
-	Duration      *int      `json:"duration,omitempty"`
-	Status        string    `json:"status"`
-	PlayURL       *string   `json:"playUrl,omitempty"`
+	ID               uuid.UUID `json:"id"`
+	Filename         string    `json:"filename"`
+	OriginalFilename *string   `json:"originalFilename,omitempty"`
+	StudentName      string    `json:"studentName"`
+	StudentNumber    string    `json:"studentNumber"`
+	Duration         *int      `json:"duration,omitempty"`
+	Status           string    `json:"status"`
+	PlayURL          *string   `json:"playUrl,omitempty"`
 }
 
 type MyTaskRubricDTO struct {
@@ -127,14 +127,14 @@ type ScoringTaskDetailProjectDTO struct {
 }
 
 type ScoringTaskDetailVideoDTO struct {
-	ID            uuid.UUID `json:"id"`
-	PlayURL       *string   `json:"playUrl,omitempty"`
-	Duration      *int      `json:"duration,omitempty"`
-	StudentName   string    `json:"studentName"`
-	StudentNumber string    `json:"studentNumber"`
-	Filename      string    `json:"filename"`
-	OriginalFilename *string `json:"originalFilename,omitempty"`
-	Status        string    `json:"status"`
+	ID               uuid.UUID `json:"id"`
+	PlayURL          *string   `json:"playUrl,omitempty"`
+	Duration         *int      `json:"duration,omitempty"`
+	StudentName      string    `json:"studentName"`
+	StudentNumber    string    `json:"studentNumber"`
+	Filename         string    `json:"filename"`
+	OriginalFilename *string   `json:"originalFilename,omitempty"`
+	Status           string    `json:"status"`
 }
 
 type ScoringTaskDetailRubricDTO struct {
@@ -209,14 +209,14 @@ func toMyTaskListItemDTO(video *model.Video, playURL *string) MyTaskListItemDTO 
 	item := MyTaskListItemDTO{
 		ID: video.ID,
 		Video: MyTaskVideoDTO{
-			ID:            video.ID,
-			Filename:      video.Filename,
+			ID:               video.ID,
+			Filename:         video.Filename,
 			OriginalFilename: video.OriginalFilename,
-			StudentName:   video.StudentName,
-			StudentNumber: video.StudentNumber,
-			Duration:      video.Duration,
-			Status:        video.Status,
-			PlayURL:       playURL,
+			StudentName:      video.StudentName,
+			StudentNumber:    video.StudentNumber,
+			Duration:         video.Duration,
+			Status:           video.Status,
+			PlayURL:          playURL,
 		},
 		Status:     video.EvaluationStatus,
 		AssignedAt: video.AssignedAt,
@@ -250,20 +250,20 @@ func toMyTaskListItemDTO(video *model.Video, playURL *string) MyTaskListItemDTO 
 	return item
 }
 
-func toScoringTaskDetailDTO(video *model.Video, manual *model.ManualEvaluation, playURL *string) *ScoringTaskDetailDTO {
+func toScoringTaskDetailDTO(video *model.Video, manual *model.ManualEvaluation, aiEvaluation any, playURL *string) *ScoringTaskDetailDTO {
 	item := &ScoringTaskDetailDTO{
 		ID: video.ID,
 		Video: ScoringTaskDetailVideoDTO{
-			ID:            video.ID,
-			PlayURL:       playURL,
-			Duration:      video.Duration,
-			StudentName:   video.StudentName,
-			StudentNumber: video.StudentNumber,
-			Filename:      video.Filename,
+			ID:               video.ID,
+			PlayURL:          playURL,
+			Duration:         video.Duration,
+			StudentName:      video.StudentName,
+			StudentNumber:    video.StudentNumber,
+			Filename:         video.Filename,
 			OriginalFilename: video.OriginalFilename,
-			Status:        video.Status,
+			Status:           video.Status,
 		},
-		AIEvaluation: nil,
+		AIEvaluation: aiEvaluation,
 		Status:       video.EvaluationStatus,
 		Deadline:     nil,
 		AssignedAt:   video.AssignedAt,

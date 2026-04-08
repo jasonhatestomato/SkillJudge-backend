@@ -13,15 +13,15 @@ type UserContext struct {
 }
 
 type AuditInput struct {
-	ActorID         *uuid.UUID
-	Action          string
-	ResourceType    *string
-	ResourceID      *uuid.UUID
-	RequestMethod   *string
-	RequestPath     *string
-	ResponseStatus  int
-	ErrorMessage    *string
-	RequestBody     map[string]any
+	ActorID        *uuid.UUID
+	Action         string
+	ResourceType   *string
+	ResourceID     *uuid.UUID
+	RequestMethod  *string
+	RequestPath    *string
+	ResponseStatus int
+	ErrorMessage   *string
+	RequestBody    map[string]any
 }
 
 type UserDTO struct {
@@ -39,6 +39,19 @@ type UserDTO struct {
 type SchoolDTO struct {
 	ID   uuid.UUID `json:"id"`
 	Name string    `json:"name"`
+}
+
+type BatchCreateUserError struct {
+	Row      *int   `json:"row,omitempty"`
+	Username string `json:"username,omitempty"`
+	Error    string `json:"error"`
+}
+
+type BatchCreateUsersResult struct {
+	Total   int                    `json:"total"`
+	Success int                    `json:"success"`
+	Failed  int                    `json:"failed"`
+	Errors  []BatchCreateUserError `json:"errors,omitempty"`
 }
 
 func ToUserDTO(user *model.User, permissions []string) *UserDTO {

@@ -3,7 +3,7 @@
 ## 1. 项目定位
 
 - 本仓库是 SkillJudge 物理实验评分系统后端。
-- 当前处于 `Phase 1`，目标是先完成最小可运行主链。
+- 当前处于 `Phase 2`，目标是完成 AI 视频分析接入、人机评分对比和学生查分链路收口。
 - 当前代码形态是“模块化单体”，不是已拆分的真实微服务。
 - 技术栈：
   - `Go`
@@ -78,15 +78,16 @@
 - `school_leader` 当前按学校负责人角色处理，权限边界与 `school_admin` 一致
 - `teacher` 主要管理自己创建的项目、批次、评分细则与视频
 - `scorer` 主要执行评分
-- `student` 当前基本未展开
+- `student` 当前已支持“我的视频结果列表 + 视频评分详情”查询
 
 当前评分规则：
 
-- `Phase 1` 只支持单评
+- 当前仍按单评模式实现
 - 一个视频只分配给一个评分员
 - 评分对象是 `video`
 - `videos` 表保存评分摘要
 - `manual_evaluations` 保存人工评分明细
+- `ai_evaluations` 保存 AI 评分任务状态和完整结果
 
 ## 6. 代码结构
 
@@ -129,6 +130,8 @@
   - 上传凭证、上传确认、视频列表、详情、删除
 - [`internal/modules/scoring/`](/Users/jason/go/src/SkillJudge/backend/internal/modules/scoring)
   - 评分员分配、我的任务、评分详情、提交评分
+- [`internal/modules/ai/`](/Users/jason/go/src/SkillJudge/backend/internal/modules/ai)
+  - AI 任务创建、轮询、结果落库、结果查询
 - [`internal/modules/system/`](/Users/jason/go/src/SkillJudge/backend/internal/modules/system)
   - `/health`、`/ready`
 
@@ -171,7 +174,22 @@
   - 前端分片直传 OBS
   - `confirm-upload`
   - 视频进入 `ready`
+  - 若 AI 已配置，则在 `confirm-upload` 后自动触发单视频 AI 评估
 - 当前不做转码
+- 学生端查询当前通过 `videos.student_id` 与用户表关联
+
+### ai
+
+- 当前外部 AI 对接方式为：
+  - 创建任务
+  - 轮询状态
+  - 拉取结果
+- 一个 `video` 对应一条 `ai_evaluations`
+- 一条 `ai_evaluations` 对应一个外部 `job_id`
+- 批量触发只是业务入口，底层仍逐视频创建 AI 任务
+- 当前已完成有限并发优化：
+  - 批量创建有限并发
+  - 后台轮询有限并发
 
 ### scoring
 
@@ -229,6 +247,15 @@
 - `GET /api/v1/videos`
 - `GET /api/v1/videos/:id`
 - `DELETE /api/v1/videos/:id`
+- `GET /api/v1/students/me/videos`
+- `GET /api/v1/students/me/videos/:id`
+
+AI：
+
+- `POST /api/v1/videos/:id/ai-evaluations`
+- `POST /api/v1/tasks/:id/ai-evaluations`
+- `GET /api/v1/ai-evaluations/:id`
+- `GET /api/v1/ai-evaluations/:id/result`
 
 评分：
 
@@ -270,7 +297,8 @@
 
 - 后端使用长期 `AK/SK` 向 IAM 申请 STS 临时凭证
 - 前端使用临时凭证直传 OBS
-- `confirm-upload` 成功后直接进入 `ready`
+- `confirm-upload` 成功后进入 `ready`
+- 若 `AI_BASE_URL` 已配置，后端会在上传确认成功后自动触发该视频的 AI 评估创建
 
 当前对象 key 规则：
 
@@ -325,32 +353,42 @@ ssh -L 15432:192.168.0.146:5432 -L 27018:192.168.0.146:27017 -L 16379:192.168.0.
 - `/health`：进程存活
 - `/ready`：检查 PostgreSQL 与 Redis
 
-## 12. 当前 Phase 1 边界
+## 12. 当前 Phase 2 边界
 
-纳入 `Phase 1`：
+纳入 `Phase 2`：
 
-- 登录与用户管理
-- 项目管理
-- 批次管理
-- 评分细则管理与模板解析
-- 视频上传主链
-- 单评模式评分闭环
+- AI 视频分析集成
+- 人机评分对比
+- 学生查分
+- 任务分配收口
+- 视频播放优化的后端配合：
+  - 稳定返回 `videoStages`
+  - 稳定返回 `videoPoints`
+  - 稳定返回时间戳字段
 
-不纳入 `Phase 1`：
+不纳入 `Phase 2`：
 
 - `task` 更新/删除
 - 视频批量上传
 - 视频转码
-- AI 评测
 - 双评、多评、复评、仲裁
 - 通知、统计、复杂报表
+- AI 深度工程化调度：
+  - 完整异步派发
+  - 多实例任务认领
+  - 阶段性交付消费
 
 ## 13. 当前状态
 
 当前状态判断：
 
-- `Phase 1` 主体工程已经基本完成
-- 剩余工作主要是联调、问题收口和测试材料完善
+- `Phase 2` 的基础联调已经基本打通
+- 当前后端已完成：
+  - 上传后自动触发 AI
+  - AI 轮询与结果落库
+  - 教师端 AI / 人工评分查看
+  - 学生端“列表 + 详情”查分
+- 剩余工作主要是联调问题收口、文档统一和后续工程化增强评估
 
 当前已经补过的联调文档：
 
@@ -376,5 +414,5 @@ ssh -L 15432:192.168.0.146:5432 -L 27018:192.168.0.146:27017 -L 16379:192.168.0.
 当前最可能继续推进的方向：
 
 - 完整联调与问题收口
-- 视业务讨论结果补 `task` 更新/删除
-- Phase 2 再规划 AI、多评、转码等能力
+- 稳定 AI 结果结构与前端展示
+- 视业务讨论结果再评估后续工程化增强

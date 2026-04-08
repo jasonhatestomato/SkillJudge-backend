@@ -71,7 +71,7 @@ func (s *Service) Create(ctx context.Context, actor user.UserContext, input Crea
 		CreatorID:      &actor.UserID,
 		Status:         "draft",
 		Deadline:       input.Deadline,
-		Tags:           input.Tags,
+		Tags:           model.StringArray(input.Tags),
 		ExperimentType: input.ExperimentType,
 		GradeLevel:     input.GradeLevel,
 		Subject:        input.Subject,
@@ -174,7 +174,7 @@ func (s *Service) Update(ctx context.Context, actor user.UserContext, id uuid.UU
 		hasChange = true
 	}
 	if input.Tags != nil {
-		updates["tags"] = input.Tags
+		updates["tags"] = model.StringArray(input.Tags)
 		hasChange = true
 	}
 	if input.ExperimentType != nil {

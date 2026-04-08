@@ -811,47 +811,51 @@ Response:
 ---
 八、AI 评测 API
 8.1 触发 AI 评测
-POST /api/v1/ai/evaluate
+POST /api/v1/videos/:id/ai-evaluations
 Authorization: Bearer {token}
 Content-Type: application/json
 
 {
-  "videoId": "uuid",
-  "taskId": "uuid",
-  "rubricId": "uuid",
-  "callbackUrl": "https://api.example.com/callback"  // 可选
+  "force": false
 }
 
 Response:
 {
-  "code": 200,
+  "code": 201,
   "data": {
     "evaluationId": "uuid",
-    "status": "processing",
-    "estimatedTime": 300  // 预计耗时（秒）
+    "videoId": "uuid",
+    "taskId": "uuid",
+    "status": "processing"
   }
 }
 8.2 批量触发 AI 评测
-POST /api/v1/ai/batch-evaluate
+POST /api/v1/tasks/:id/ai-evaluations
 Authorization: Bearer {token}
 Content-Type: application/json
 
 {
-  "projectId": "uuid",
-  "videoIds": ["uuid1", "uuid2", ...]
+  "videoIds": ["uuid1", "uuid2"],
+  "force": false
 }
 
 Response:
 {
-  "code": 200,
+  "code": 201,
   "data": {
-    "total": 50,
-    "queued": 50,
-    "estimatedTime": 7200
+    "total": 2,
+    "processing": 1,
+    "failed": 1,
+    "errors": [
+      {
+        "videoId": "uuid2",
+        "error": "ai evaluation already exists, use force=true to create a new run"
+      }
+    ]
   }
 }
-8.3 查询 AI 评测结果
-GET /api/v1/ai/evaluations/:id
+8.3 查询 AI 评测状态
+GET /api/v1/ai-evaluations/:id
 Authorization: Bearer {token}
 
 Response:
@@ -861,74 +865,44 @@ Response:
     "id": "uuid",
     "videoId": "uuid",
     "taskId": "uuid",
-    "status": "completed",  // processing, completed, failed
+    "status": "processing",  // processing, completed, failed
     "modelVersion": "v1.2.0",
-    "totalScore": 75.5,
-    "result": {
-      "videostage": [
-        {
-          "name": "实验准备",
-          "color": "purple",
-          "start_time": "00:00:00",
-          "end_time": "00:00:30"
-        },
-        ...
-      ],
-      "videopoint": [
-        {
-          "name": "未锁止工具车",
-          "type": "general error",
-          "start_time": "00:00:05",
-          "end_time": "00:00:10"
-        },
-        ...
-      ],
-      "report": {
-        "overallDescription": "...",
-        "score": 75.5,
-        "details": [
-          {
-            "title": "一、实验准备",
-            "label": "扣分",
-            "labelColor": "purple",
-            "subscore": 8,
-            "subDetails": [
-              {
-                "subtitle": "个人防护",
-                "subsubscore": 2,
-                "AIscore": 2,
-                "status": "correct",
-                "feedback": "..."
-              },
-              ...
-            ]
-          },
-          ...
-        ]
-      }
-    },
-    "completedAt": "..."
+    "totalScore": null,
+    "errorMessage": null,
+    "createdAt": "2026-04-02T10:00:00Z",
+    "updatedAt": "2026-04-02T10:03:00Z",
+    "startedAt": "2026-04-02T10:00:10Z",
+    "completedAt": null
   }
 }
-8.4 AI 评测回调接口（供 AI 服务调用）
-POST /api/v1/ai/callback
-Content-Type: application/json
-X-AI-Signature: {signature}  // 签名验证
-
-{
-  "evaluationId": "uuid",
-  "taskId": "uuid",
-  "videoId": "uuid",
-  "status": "completed",
-  "result": {...},  // 完整的评测结果
-  "modelVersion": "v1.2.0",
-  "processingTime": 285
-}
+8.4 查询 AI 评测完整结果
+GET /api/v1/ai-evaluations/:id/result
+Authorization: Bearer {token}
 
 Response:
 {
   "code": 200,
-  "message": "Received"
+  "data": {
+    "id": "uuid",
+    "videoId": "uuid",
+    "taskId": "uuid",
+    "status": "completed",
+    "modelVersion": "v1.2.0",
+    "summary": {
+      "overallDescription": "...",
+      "score": 75.5,
+      "maxScore": 100
+    },
+    "details": [...],
+    "videoStages": [...],
+    "videoPoints": [...],
+    "artifacts": {
+      "reportHtmlUrl": "https://example.com/report.html",
+      "analysisJsonUrl": "https://example.com/analysis.json",
+      "evidenceIndexJsonUrl": "https://example.com/evidence.json"
+    },
+    "completedAt": "2026-04-02T10:06:00Z"
+  }
 }
 
 ---

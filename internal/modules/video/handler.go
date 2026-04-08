@@ -197,6 +197,56 @@ func (h *Handler) Get(c *gin.Context) {
 	response.Success(c, http.StatusOK, result)
 }
 
+func (h *Handler) ListMine(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+
+	result, err := h.service.ListMine(c.Request.Context(), actor, ListParams{
+		Page:          page,
+		PageSize:      pageSize,
+		Status:        c.Query("status"),
+		StudentNumber: c.Query("studentNumber"),
+		Keyword:       c.Query("keyword"),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to list my videos", nil)
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, result)
+}
+
+func (h *Handler) GetMine(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	videoID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid video id", nil)
+		return
+	}
+
+	result, err := h.service.GetMineByID(c.Request.Context(), actor, videoID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrVideoNotFound):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, ErrInvalidVideoScope), errors.Is(err, ErrRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to load my video", nil)
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, result)
+}
+
 func (h *Handler) Delete(c *gin.Context) {
 	actor := middleware.CurrentUser(c)
 	videoID, err := uuid.Parse(c.Param("id"))

@@ -216,7 +216,7 @@ func (r *Repository) SubmitManualEvaluation(ctx context.Context, video *model.Vi
 
 		videoUpdates := map[string]any{
 			"manual_score":      input.TotalScore,
-			"manual_status":     VideoManualStatusCompleted,
+			"manual_status":     VideoManualStatusSubmitted,
 			"evaluation_status": VideoEvaluationStatusCompleted,
 			"completed_at":      submittedAt,
 			"updated_at":        submittedAt,

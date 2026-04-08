@@ -1,6 +1,6 @@
 # SkillJudge Backend
 
-SkillJudge 后端当前处于 `Phase 1`，目标是先完成最小可运行主链。当前代码形态是模块化单体，技术栈为 `Go + Gin + GORM + PostgreSQL + Redis + JWT + OBS(STS)`。
+SkillJudge 后端当前处于 `Phase 2`，重点是完成 AI 视频分析接入、人机评分对比和学生查分链路收口。当前代码形态是模块化单体，技术栈为 `Go + Gin + GORM + PostgreSQL + Redis + JWT + OBS(STS)`。
 
 ## 当前主链
 
@@ -41,6 +41,7 @@ SkillJudge 后端当前处于 `Phase 1`，目标是先完成最小可运行主�
   - 登录、刷新、登出
   - `/users/me`
   - 用户 CRUD
+  - 用户批量创建
   - 正式 RBAC 查询链
 - `project`
   - 项目 CRUD
@@ -63,6 +64,15 @@ SkillJudge 后端当前处于 `Phase 1`，目标是先完成最小可运行主�
   - 我的评分列表
   - 评分详情
   - 提交人工评分
+- `ai`
+  - 单视频 AI 评估触发
+  - 任务批量 AI 评估触发
+  - AI 状态查询
+  - AI 结果查询
+  - 外部 AI 轮询与结果落库
+- `student`
+  - 我的结果视频列表
+  - 我的结果视频详情
 
 ## 当前已实现接口
 
@@ -74,6 +84,7 @@ SkillJudge 后端当前处于 `Phase 1`，目标是先完成最小可运行主�
 - `GET /api/v1/users/me`
 - `PATCH /api/v1/users/me`
 - `POST /api/v1/users`
+- `POST /api/v1/users/batch`
 - `GET /api/v1/users`
 - `PATCH /api/v1/users/:id`
 - `DELETE /api/v1/users/:id`
@@ -99,6 +110,12 @@ SkillJudge 后端当前处于 `Phase 1`，目标是先完成最小可运行主�
 - `GET /api/v1/videos`
 - `GET /api/v1/videos/:id`
 - `DELETE /api/v1/videos/:id`
+- `GET /api/v1/students/me/videos`
+- `GET /api/v1/students/me/videos/:id`
+- `POST /api/v1/videos/:id/ai-evaluations`
+- `POST /api/v1/tasks/:id/ai-evaluations`
+- `GET /api/v1/ai-evaluations/:id`
+- `GET /api/v1/ai-evaluations/:id/result`
 
 ## 关键约定
 
@@ -117,6 +134,10 @@ SkillJudge 后端当前处于 `Phase 1`，目标是先完成最小可运行主�
   - `user_roles -> role_permissions -> permissions`
 - 当前数据库里的学校负责人角色使用 `school_leader`
 - 后端实现中 `school_leader` 与 `school_admin` 按同一学校级管理边界处理
+- `POST /api/v1/users/batch` 使用 `application/json`，由前端先解析表格再传 `items`
+- 用户创建时：
+  - `admin` 创建非 `admin` 用户必须提供 `schoolId`
+  - `school_admin` / `school_leader` 创建用户时可省略 `schoolId`，后端会自动继承当前操作者学校
 
 视频上传：
 
@@ -128,13 +149,27 @@ SkillJudge 后端当前处于 `Phase 1`，目标是先完成最小可运行主�
 
 评分：
 
-- 当前 `Phase 1` 只支持单评
+- 当前仍按单评模式实现
 - 评分对象是 `video`
 - `videos` 保存评分摘要
 - `manual_evaluations` 保存人工评分明细
+- `ai_evaluations` 保存 AI 评分状态和完整结果
 - 当前 `GET /api/v1/tasks/:id` 是双语义：
   - `scorer` 访问时返回评分详情
   - 非 `scorer` 访问时返回批次详情
+
+AI：
+
+- 当前外部 AI 采用“创建任务 + 轮询状态 + 拉取结果”模式
+- `confirm-upload` 成功后，若 AI 已配置，后端会自动触发单视频 AI 评估创建
+- 一个 `video` 对应一条 `ai_evaluations`
+- 一条 `ai_evaluations` 对应一个外部 `job_id`
+- 批量 AI 触发底层仍逐视频创建
+
+学生查分：
+
+- 上传视频时支持从文件名 `姓名_uuid` 中兜底解析 `student_id`
+- 学生端当前通过 `videos.student_id = 当前用户.id` 查询自己的视频和评分结果
 
 评分细则模板：
 
@@ -175,33 +210,32 @@ curl http://127.0.0.1:8080/health
 curl http://127.0.0.1:8080/ready
 ```
 
-## Phase 1 边界
+## Phase 2 边界
 
-纳入 `Phase 1`：
+纳入 `Phase 2`：
 
-- 登录与用户管理
-- 项目管理
-- 批次管理
-- 评分细则管理与模板解析
-- 视频上传主链
-- 单评模式评分闭环
+- AI 视频分析集成
+- 人机评分对比
+- 学生查分
+- 任务分配收口
+- 视频播放优化的后端配合
 
-当前不纳入 `Phase 1`：
+当前不纳入 `Phase 2`：
 
 - `task` 更新/删除
 - 视频批量上传
 - 视频转码
-- AI 评测
 - 双评、多评、复评、仲裁
 - 通知、统计、复杂报表
+- AI 深度工程化调度
 
 ## 当前状态
 
-当前 `Phase 1` 主体工程已经基本完成，下一步主要是：
+当前 `Phase 2` 联调主链已经基本打通，下一步主要是：
 
-1. 联调验证
-2. 问题收口
-3. 再决定是否进入下一阶段功能
+1. 继续收口联调问题
+2. 稳定 AI 结果结构与前端展示
+3. 视需要再推进工程化增强
 
 联调文档可参考：
 

@@ -17,10 +17,38 @@ type UploadCredentialDTO struct {
 
 type VideoTaskDTO struct {
 	ID          *uuid.UUID `json:"id,omitempty"`
+	RubricID    *uuid.UUID `json:"rubricId,omitempty"`
 	Name        *string    `json:"name,omitempty"`
 	Status      *string    `json:"status,omitempty"`
 	AIScore     *float64   `json:"aiScore,omitempty"`
 	ManualScore *float64   `json:"manualScore,omitempty"`
+}
+
+type VideoRubricSubItemDTO struct {
+	ID                 string  `json:"id"`
+	Requirement        string  `json:"requirement"`
+	Score              float64 `json:"score"`
+	FullScoreStandard  string  `json:"fullScoreStandard"`
+	DeductionItems     string  `json:"deductionItems"`
+	DangerousOperation *string `json:"dangerousOperation,omitempty"`
+}
+
+type VideoRubricItemDTO struct {
+	ID       string                  `json:"id"`
+	Name     string                  `json:"name"`
+	Score    float64                 `json:"score"`
+	SubItems []VideoRubricSubItemDTO `json:"subItems"`
+}
+
+type VideoRubricDTO struct {
+	ID           uuid.UUID            `json:"id"`
+	Name         string               `json:"name"`
+	Description  *string              `json:"description,omitempty"`
+	TotalScore   int                  `json:"totalScore"`
+	TemplateType *string              `json:"templateType,omitempty"`
+	IsTemplate   bool                 `json:"isTemplate"`
+	IsPublic     bool                 `json:"isPublic"`
+	Items        []VideoRubricItemDTO `json:"items"`
 }
 
 type VideoListItemDTO struct {
@@ -70,35 +98,74 @@ type VideoManualEvaluationDTO struct {
 }
 
 type VideoDetailDTO struct {
-	ID               uuid.UUID        `json:"id"`
-	Filename         string           `json:"filename"`
-	OriginalFilename *string          `json:"originalFilename,omitempty"`
-	StudentName      string           `json:"studentName"`
-	StudentNumber    string           `json:"studentNumber"`
-	Duration         *int             `json:"duration,omitempty"`
-	Status           string           `json:"status"`
-	UploadProgress   int              `json:"uploadProgress"`
-	Resolution       *string          `json:"resolution,omitempty"`
-	Format           *string          `json:"format,omitempty"`
-	TranscodeStatus  *string          `json:"transcodeStatus,omitempty"`
-	PlayURL          *string          `json:"playUrl,omitempty"`
-	StorageURL       *string          `json:"storageUrl,omitempty"`
-	ThumbnailURL     *string          `json:"thumbnailUrl,omitempty"`
-	FileSize         int64            `json:"fileSize"`
-	UploadedAt       *time.Time       `json:"uploadedAt,omitempty"`
-	AssignedAt       *time.Time       `json:"assignedAt,omitempty"`
-	CompletedAt      *time.Time       `json:"completedAt,omitempty"`
-	EvaluationStatus string           `json:"evaluationStatus"`
-	AIStatus         string           `json:"aiStatus"`
-	ManualStatus     string           `json:"manualStatus"`
-	AIScore          *float64         `json:"aiScore,omitempty"`
-	ManualScore      *float64         `json:"manualScore,omitempty"`
-	Project          *VideoProjectDTO `json:"project,omitempty"`
-	Creator          *VideoOwnerDTO   `json:"creator,omitempty"`
-	Scorer           *VideoOwnerDTO   `json:"scorer,omitempty"`
-	Task             *VideoTaskDTO    `json:"task,omitempty"`
-	AIEvaluation     any              `json:"aiEvaluation,omitempty"`
+	ID               uuid.UUID                 `json:"id"`
+	Filename         string                    `json:"filename"`
+	OriginalFilename *string                   `json:"originalFilename,omitempty"`
+	StudentName      string                    `json:"studentName"`
+	StudentNumber    string                    `json:"studentNumber"`
+	Duration         *int                      `json:"duration,omitempty"`
+	Status           string                    `json:"status"`
+	UploadProgress   int                       `json:"uploadProgress"`
+	Resolution       *string                   `json:"resolution,omitempty"`
+	Format           *string                   `json:"format,omitempty"`
+	TranscodeStatus  *string                   `json:"transcodeStatus,omitempty"`
+	PlayURL          *string                   `json:"playUrl,omitempty"`
+	StorageURL       *string                   `json:"storageUrl,omitempty"`
+	ThumbnailURL     *string                   `json:"thumbnailUrl,omitempty"`
+	FileSize         int64                     `json:"fileSize"`
+	UploadedAt       *time.Time                `json:"uploadedAt,omitempty"`
+	AssignedAt       *time.Time                `json:"assignedAt,omitempty"`
+	CompletedAt      *time.Time                `json:"completedAt,omitempty"`
+	EvaluationStatus string                    `json:"evaluationStatus"`
+	AIStatus         string                    `json:"aiStatus"`
+	ManualStatus     string                    `json:"manualStatus"`
+	AIScore          *float64                  `json:"aiScore,omitempty"`
+	ManualScore      *float64                  `json:"manualScore,omitempty"`
+	Project          *VideoProjectDTO          `json:"project,omitempty"`
+	Creator          *VideoOwnerDTO            `json:"creator,omitempty"`
+	Scorer           *VideoOwnerDTO            `json:"scorer,omitempty"`
+	Task             *VideoTaskDTO             `json:"task,omitempty"`
+	Rubric           *VideoRubricDTO           `json:"rubric,omitempty"`
+	AIEvaluation     any                       `json:"aiEvaluation,omitempty"`
 	ManualEvaluation *VideoManualEvaluationDTO `json:"manualEvaluation,omitempty"`
+}
+
+func toVideoRubricDTO(rubric *model.ScoringRubric) *VideoRubricDTO {
+	if rubric == nil {
+		return nil
+	}
+
+	items := make([]VideoRubricItemDTO, 0, len(rubric.Items))
+	for _, item := range rubric.Items {
+		subItems := make([]VideoRubricSubItemDTO, 0, len(item.SubItems))
+		for _, subItem := range item.SubItems {
+			subItems = append(subItems, VideoRubricSubItemDTO{
+				ID:                 subItem.ID,
+				Requirement:        subItem.Requirement,
+				Score:              subItem.Score,
+				FullScoreStandard:  subItem.FullScoreStandard,
+				DeductionItems:     subItem.DeductionItems,
+				DangerousOperation: subItem.DangerousOperation,
+			})
+		}
+		items = append(items, VideoRubricItemDTO{
+			ID:       item.ID,
+			Name:     item.Name,
+			Score:    item.Score,
+			SubItems: subItems,
+		})
+	}
+
+	return &VideoRubricDTO{
+		ID:           rubric.ID,
+		Name:         rubric.Name,
+		Description:  rubric.Description,
+		TotalScore:   rubric.TotalScore,
+		TemplateType: rubric.TemplateType,
+		IsTemplate:   rubric.IsTemplate,
+		IsPublic:     rubric.IsPublic,
+		Items:        items,
+	}
 }
 
 type Pagination struct {
@@ -141,6 +208,7 @@ func ToVideoListItemDTO(item *model.Video) VideoListItemDTO {
 	if item.Task != nil {
 		dto.Task = &VideoTaskDTO{
 			ID:          &item.Task.ID,
+			RubricID:    &item.Task.RubricID,
 			Name:        &item.Task.Name,
 			Status:      &item.Task.Status,
 			AIScore:     item.AIScore,
@@ -158,7 +226,7 @@ func ToVideoListItemDTO(item *model.Video) VideoListItemDTO {
 	return dto
 }
 
-func ToVideoDetailDTO(item *model.Video, playURL *string, manual *model.ManualEvaluation) *VideoDetailDTO {
+func ToVideoDetailDTO(item *model.Video, playURL *string, manual *model.ManualEvaluation, aiEvaluation any) *VideoDetailDTO {
 	dto := &VideoDetailDTO{
 		ID:               item.ID,
 		Filename:         item.Filename,
@@ -183,17 +251,19 @@ func ToVideoDetailDTO(item *model.Video, playURL *string, manual *model.ManualEv
 		ManualStatus:     item.ManualStatus,
 		AIScore:          item.AIScore,
 		ManualScore:      item.ManualScore,
-		AIEvaluation:     nil,
+		AIEvaluation:     aiEvaluation,
 	}
 
 	if item.Task != nil {
 		dto.Task = &VideoTaskDTO{
 			ID:          &item.Task.ID,
+			RubricID:    &item.Task.RubricID,
 			Name:        &item.Task.Name,
 			Status:      &item.Task.Status,
 			AIScore:     item.AIScore,
 			ManualScore: item.ManualScore,
 		}
+		dto.Rubric = toVideoRubricDTO(item.Task.Rubric)
 	}
 	project := item.Project
 	if project == nil && item.Task != nil {

@@ -8,6 +8,7 @@ import (
 	"skilljudge/backend/internal/bootstrap"
 	"skilljudge/backend/internal/config"
 	"skilljudge/backend/internal/http/middleware"
+	"skilljudge/backend/internal/modules/ai"
 	"skilljudge/backend/internal/modules/auth"
 	"skilljudge/backend/internal/modules/project"
 	"skilljudge/backend/internal/modules/scoring"
@@ -24,9 +25,10 @@ import (
 )
 
 type App struct {
-	engine *gin.Engine
-	host   string
-	port   string
+	engine    *gin.Engine
+	host      string
+	port      string
+	aiService *ai.Service
 }
 
 func New() (*App, error) {
@@ -60,16 +62,19 @@ func New() (*App, error) {
 	taskRepo := task.NewRepository(db)
 	taskService := task.NewService(taskRepo, projectRepo)
 	storageProvider := storage.NewProvider(cfg.Storage)
+	aiRepo := ai.NewRepository(db)
+	aiService := ai.NewService(aiRepo, taskService, storageProvider, cfg.AI)
 	scoringRepo := scoring.NewRepository(db)
-	scoringService := scoring.NewService(scoringRepo, taskService, storageProvider)
+	scoringService := scoring.NewService(scoringRepo, aiService, taskService, storageProvider)
 	videoRepo := video.NewRepository(db)
-	videoService := video.NewService(videoRepo, projectRepo, taskService, storageProvider)
+	videoService := video.NewService(videoRepo, aiService, projectRepo, taskService, storageProvider)
 
 	jwtManager := platformjwt.NewManager(cfg.JWT.Issuer, cfg.JWT.Secret)
 	sessionStore := auth.NewSessionStore(redisClient)
 	authService := auth.NewService(userRepo, userService, sessionStore, jwtManager, cfg.JWT)
 
 	authHandler := auth.NewHandler(authService, userService)
+	aiHandler := ai.NewHandler(aiService)
 	projectHandler := project.NewHandler(projectService)
 	scoringHandler := scoring.NewHandler(scoringService)
 	systemHandler := system.NewHandler(db, redisClient)
@@ -81,12 +86,13 @@ func New() (*App, error) {
 	router.Use(corsMiddleware())
 	// Route registration stays centralized here so module wiring and
 	// permission boundaries can be audited from a single entry point.
-	registerRoutes(router, authService, userService, authHandler, systemHandler, userHandler, projectHandler, taskHandler, scoringHandler, videoHandler)
+	registerRoutes(router, authService, userService, authHandler, aiHandler, systemHandler, userHandler, projectHandler, taskHandler, scoringHandler, videoHandler)
 
 	return &App{
-		engine: router,
-		host:   cfg.HTTP.Host,
-		port:   cfg.HTTP.Port,
+		engine:    router,
+		host:      cfg.HTTP.Host,
+		port:      cfg.HTTP.Port,
+		aiService: aiService,
 	}, nil
 }
 
@@ -120,6 +126,9 @@ func corsMiddleware() gin.HandlerFunc {
 }
 
 func (a *App) Run() error {
+	if a.aiService != nil {
+		go a.aiService.RunPoller(context.Background())
+	}
 	addr := fmt.Sprintf(":%s", a.port)
 	if a.host != "" {
 		addr = fmt.Sprintf("%s:%s", a.host, a.port)
@@ -127,7 +136,7 @@ func (a *App) Run() error {
 	return a.engine.Run(addr)
 }
 
-func registerRoutes(router *gin.Engine, authService *auth.Service, userService *user.Service, authHandler *auth.Handler, systemHandler *system.Handler, userHandler *user.Handler, projectHandler *project.Handler, taskHandler *task.Handler, scoringHandler *scoring.Handler, videoHandler *video.Handler) {
+func registerRoutes(router *gin.Engine, authService *auth.Service, userService *user.Service, authHandler *auth.Handler, aiHandler *ai.Handler, systemHandler *system.Handler, userHandler *user.Handler, projectHandler *project.Handler, taskHandler *task.Handler, scoringHandler *scoring.Handler, videoHandler *video.Handler) {
 	router.GET("/health", systemHandler.Health)
 	router.GET("/ready", systemHandler.Ready)
 
@@ -142,6 +151,7 @@ func registerRoutes(router *gin.Engine, authService *auth.Service, userService *
 	userGroup.GET("/me", userHandler.GetMe)
 	userGroup.PATCH("/me", userHandler.UpdateMe)
 	userGroup.POST("", middleware.RequirePermission(userService, "user:create"), userHandler.Create)
+	userGroup.POST("/batch", middleware.RequirePermission(userService, "user:create"), userHandler.BatchCreate)
 	userGroup.GET("", middleware.RequirePermission(userService, "user:read"), userHandler.List)
 	userGroup.PATCH("/:id", middleware.RequirePermission(userService, "user:update"), userHandler.Update)
 	userGroup.DELETE("/:id", middleware.RequirePermission(userService, "user:delete"), userHandler.Delete)
@@ -170,6 +180,7 @@ func registerRoutes(router *gin.Engine, authService *auth.Service, userService *
 	})
 	taskGroup.POST("/:id/submit", middleware.RequirePermission(userService, "task:submit"), scoringHandler.SubmitTask)
 	taskGroup.POST("/:id/assignments", middleware.RequirePermission(userService, "task:update"), scoringHandler.AssignScorers)
+	taskGroup.POST("/:id/ai-evaluations", middleware.RequirePermission(userService, "task:update"), aiHandler.BatchCreateForTask)
 
 	rubricGroup := api.Group("/rubrics", middleware.RequireAuth(authService))
 	rubricGroup.POST("", middleware.RequirePermission(userService, "rubric:create"), projectHandler.CreateRubric)
@@ -182,7 +193,17 @@ func registerRoutes(router *gin.Engine, authService *auth.Service, userService *
 	videoGroup := api.Group("/videos", middleware.RequireAuth(authService))
 	videoGroup.POST("/upload-credential", middleware.RequirePermission(userService, "video:create"), videoHandler.CreateUploadCredential)
 	videoGroup.POST("/:id/confirm-upload", middleware.RequirePermission(userService, "video:create"), videoHandler.ConfirmUpload)
+	videoGroup.POST("/:id/ai-evaluations", middleware.RequirePermission(userService, "task:update"), aiHandler.CreateForVideo)
 	videoGroup.GET("", middleware.RequirePermission(userService, "video:read"), videoHandler.List)
 	videoGroup.GET("/:id", middleware.RequirePermission(userService, "video:read"), videoHandler.Get)
 	videoGroup.DELETE("/:id", middleware.RequirePermission(userService, "video:delete"), videoHandler.Delete)
+
+	studentGroup := api.Group("/students", middleware.RequireAuth(authService))
+	studentGroup.GET("/me/videos", videoHandler.ListMine)
+	studentGroup.GET("/me/videos/:id", videoHandler.GetMine)
+
+	aiGroup := api.Group("/ai-evaluations", middleware.RequireAuth(authService))
+	aiGroup.GET("/:id", middleware.RequirePermission(userService, "task:read"), aiHandler.Get)
+	aiGroup.GET("/:id/result", middleware.RequirePermission(userService, "task:read"), aiHandler.GetResult)
+
 }

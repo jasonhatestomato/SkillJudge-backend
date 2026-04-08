@@ -56,7 +56,7 @@ func ToProjectDTO(item *model.Project) *ProjectDTO {
 		Deadline:        item.Deadline,
 		StartDate:       item.StartDate,
 		EndDate:         item.EndDate,
-		Tags:            item.Tags,
+		Tags:            []string(item.Tags),
 		ExperimentType:  item.ExperimentType,
 		GradeLevel:      item.GradeLevel,
 		Subject:         item.Subject,

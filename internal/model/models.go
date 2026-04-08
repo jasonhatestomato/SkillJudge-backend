@@ -142,12 +142,12 @@ type Project struct {
 	Deadline        *time.Time
 	StartDate       *time.Time
 	EndDate         *time.Time
-	Tags            []string `gorm:"type:text[]"`
-	ExperimentType  *string  `gorm:"size:50"`
-	GradeLevel      *string  `gorm:"size:20"`
-	Subject         *string  `gorm:"size:50"`
-	TotalVideos     int      `gorm:"default:0"`
-	CompletedVideos int      `gorm:"default:0"`
+	Tags            StringArray `gorm:"type:text[]"`
+	ExperimentType  *string     `gorm:"size:50"`
+	GradeLevel      *string     `gorm:"size:20"`
+	Subject         *string     `gorm:"size:50"`
+	TotalVideos     int         `gorm:"default:0"`
+	CompletedVideos int         `gorm:"default:0"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	Metadata        map[string]any `gorm:"type:jsonb;serializer:json"`
@@ -261,11 +261,34 @@ type Video struct {
 	School            *School
 	Scorer            *User              `gorm:"foreignKey:ScorerID"`
 	Creator           *User              `gorm:"foreignKey:CreatorID"`
+	AIEvaluations     []AIEvaluation     `gorm:"foreignKey:VideoID"`
 	ManualEvaluations []ManualEvaluation `gorm:"foreignKey:VideoID"`
 }
 
 func (Video) TableName() string {
 	return "videos"
+}
+
+type AIEvaluation struct {
+	ID           uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	TaskID       uuid.UUID `gorm:"type:uuid;not null;index"`
+	VideoID      uuid.UUID `gorm:"type:uuid;not null;index"`
+	JobID        *string   `gorm:"column:job_id;size:100;index"`
+	ModelVersion *string   `gorm:"size:50"`
+	TotalScore   *float64  `gorm:"type:decimal(5,2)"`
+	Status       string    `gorm:"size:20;default:processing;not null;index"`
+	StartedAt    *time.Time
+	CompletedAt  *time.Time
+	ErrorMessage *string
+	ResultData   map[string]any `gorm:"type:jsonb;serializer:json"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Task         *Task  `gorm:"foreignKey:TaskID"`
+	Video        *Video `gorm:"foreignKey:VideoID"`
+}
+
+func (AIEvaluation) TableName() string {
+	return "ai_evaluations"
 }
 
 type ManualEvaluation struct {

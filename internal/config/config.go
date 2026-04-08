@@ -27,6 +27,7 @@ type Config struct {
 	DB        DBConfig
 	Redis     RedisConfig
 	JWT       JWTConfig
+	AI        AIConfig
 	Storage   StorageConfig
 	Bootstrap BootstrapConfig
 }
@@ -63,6 +64,17 @@ type JWTConfig struct {
 	RefreshTokenTTL    time.Duration
 	UserCacheTTL       time.Duration
 	PermissionCacheTTL time.Duration
+}
+
+type AIConfig struct {
+	BaseURL           string
+	AnalysisPath      string
+	APIToken          string
+	RequestTimeout    time.Duration
+	PollInterval      time.Duration
+	PollBatchSize     int
+	CreateConcurrency int
+	PollConcurrency   int
 }
 
 type StorageConfig struct {
@@ -117,6 +129,16 @@ func Load() (Config, error) {
 			RefreshTokenTTL:    getEnvDuration("JWT_REFRESH_TOKEN_TTL", defaultRefreshTokenTTL),
 			UserCacheTTL:       getEnvDuration("USER_CACHE_TTL", defaultUserCacheTTL),
 			PermissionCacheTTL: getEnvDuration("PERMISSION_CACHE_TTL", defaultPermissionCacheTTL),
+		},
+		AI: AIConfig{
+			BaseURL:           getEnv("AI_BASE_URL", ""),
+			AnalysisPath:      getEnv("AI_ANALYSIS_PATH", "/api/v1/analysis-jobs"),
+			APIToken:          getEnv("AI_API_TOKEN", ""),
+			RequestTimeout:    getEnvDuration("AI_REQUEST_TIMEOUT", 15*time.Second),
+			PollInterval:      getEnvDuration("AI_POLL_INTERVAL", 10*time.Second),
+			PollBatchSize:     getEnvInt("AI_POLL_BATCH_SIZE", 20),
+			CreateConcurrency: getEnvInt("AI_CREATE_CONCURRENCY", 5),
+			PollConcurrency:   getEnvInt("AI_POLL_CONCURRENCY", 5),
 		},
 		Storage: StorageConfig{
 			Provider:        getEnv("STORAGE_PROVIDER", "mock"),

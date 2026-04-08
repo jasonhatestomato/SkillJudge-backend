@@ -25,6 +25,21 @@ type createUserRequest struct {
 	SchoolID *string `json:"schoolId"`
 }
 
+type batchCreateUserItemRequest struct {
+	Row      *int    `json:"row"`
+	Username string  `json:"username" binding:"required"`
+	Password string  `json:"password" binding:"required"`
+	Email    *string `json:"email"`
+	Phone    *string `json:"phone"`
+	RealName *string `json:"realName"`
+	Role     string  `json:"role" binding:"required"`
+	SchoolID *string `json:"schoolId"`
+}
+
+type batchCreateUsersRequest struct {
+	Items []batchCreateUserItemRequest `json:"items" binding:"required"`
+}
+
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
@@ -113,6 +128,46 @@ func (h *Handler) Create(c *gin.Context) {
 
 	h.audit(c, actor.UserID, "user.create", stringPtr("user"), &result.ID, http.StatusCreated, "", buildCreateUserAuditBody(req))
 	response.Success(c, http.StatusCreated, result)
+}
+
+func (h *Handler) BatchCreate(c *gin.Context) {
+	actor := currentUser(c)
+	var req batchCreateUsersRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid request payload", nil)
+		return
+	}
+
+	inputs := make([]BatchCreateUserInput, 0, len(req.Items))
+	for _, item := range req.Items {
+		inputs = append(inputs, BatchCreateUserInput{
+			Row:      item.Row,
+			Username: item.Username,
+			Password: item.Password,
+			Email:    item.Email,
+			Phone:    item.Phone,
+			RealName: item.RealName,
+			Role:     item.Role,
+			SchoolID: item.SchoolID,
+		})
+	}
+
+	result, err := h.service.BatchCreate(c.Request.Context(), actor, inputs)
+	if err != nil {
+		status := http.StatusInternalServerError
+		message := "failed to batch create users"
+		switch {
+		case errors.Is(err, ErrBatchCreateItemsRequired):
+			status = http.StatusBadRequest
+			message = err.Error()
+		}
+		h.audit(c, actor.UserID, "user.batch_create", stringPtr("user"), nil, status, message, buildBatchCreateAuditBody(req, nil))
+		response.Error(c, status, message, nil)
+		return
+	}
+
+	h.audit(c, actor.UserID, "user.batch_create", stringPtr("user"), nil, http.StatusOK, "", buildBatchCreateAuditBody(req, result))
+	response.Success(c, http.StatusOK, result)
 }
 
 func (h *Handler) List(c *gin.Context) {
@@ -263,4 +318,46 @@ func buildManagedUserAuditBody(input UpdateManagedUserInput) map[string]any {
 	}
 
 	return body
+}
+
+func buildBatchCreateAuditBody(req batchCreateUsersRequest, result *BatchCreateUsersResult) map[string]any {
+	body := map[string]any{
+		"total": len(req.Items),
+	}
+
+	items := make([]map[string]any, 0, minInt(len(req.Items), 10))
+	for index, item := range req.Items {
+		if index >= 10 {
+			body["truncated"] = true
+			break
+		}
+
+		row := map[string]any{
+			"username": item.Username,
+			"role":     item.Role,
+		}
+		if item.Row != nil {
+			row["row"] = *item.Row
+		}
+		if item.SchoolID != nil {
+			row["schoolId"] = *item.SchoolID
+		}
+		items = append(items, row)
+	}
+	if len(items) > 0 {
+		body["items"] = items
+	}
+	if result != nil {
+		body["success"] = result.Success
+		body["failed"] = result.Failed
+	}
+
+	return body
+}
+
+func minInt(left int, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }
