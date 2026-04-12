@@ -1,0 +1,22 @@
+services:
+  ai-eval-mock:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: skilljudge-ai-eval-mock
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    ports:
+      - "127.0.0.1:14997:14997"
+    volumes:
+      - /tmp/skilljudge-ai:/tmp/skilljudge-ai
+
+  redis:
+    image: redis:7-alpine
+    container_name: skilljudge-ai-eval-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
