@@ -342,11 +342,7 @@ cd /Users/jason/go/src/SkillJudge/backend
 go run ./cmd/server
 ```
 
-如果本地通过 SSH 隧道访问数据库和 Redis，先建立隧道：
-
-```bash
-ssh -L 15432:192.168.0.146:5432 -L 27018:192.168.0.146:27017 -L 16379:192.168.0.146:6379 root@123.60.51.11
-```
+当前默认直接连公网 PostgreSQL 和 Redis，不再要求先建 SSH 隧道。启动前确认 [`.env`](/Users/jason/go/src/SkillJudge/backend/.env) 中的 `DB_HOST`、`DB_PORT`、`REDIS_ADDR` 已配置为公网地址。
 
 健康检查：
 

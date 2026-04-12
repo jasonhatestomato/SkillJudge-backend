@@ -6,13 +6,13 @@ password:Liushaojun@
 
 
 # Postgres
-192.168.0.146：5432
+123.60.51.11：5432
 数据库：skilljudge_db
 用户名：skilljudge
 密码：skilljudge12345
 
 
 # Redis
-192.168.0.146：6379
+123.60.51.11：6379
 数据库：0
 密码:skilljudge12345

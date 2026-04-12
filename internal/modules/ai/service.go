@@ -262,6 +262,13 @@ func (s *Service) dispatchCreateJob(ctx context.Context, evaluation *model.AIEva
 	if jobID == "" {
 		return ErrProviderResponseInvalid
 	}
+	log.Printf(
+		"ai dispatch: evaluation=%s video=%s provider_job=%s accepted_status=%s",
+		evaluation.ID,
+		evaluation.VideoID,
+		jobID,
+		result.Status,
+	)
 	evaluation.JobID = &jobID
 	return s.repo.SetJobID(ctx, evaluation.ID, jobID)
 }
@@ -289,6 +296,14 @@ func (s *Service) RunPoller(ctx context.Context) {
 	if interval <= 0 {
 		interval = 10 * time.Second
 	}
+	log.Printf(
+		"ai poller configured: base_url=%s analysis_path=%s poll_interval=%s request_timeout=%s job_not_found_grace=%s",
+		s.config.BaseURL,
+		s.config.AnalysisPath,
+		interval,
+		s.config.RequestTimeout,
+		s.config.JobNotFoundGrace,
+	)
 
 	s.pollOnce(ctx)
 
@@ -349,9 +364,28 @@ func (s *Service) pollEvaluation(ctx context.Context, item *model.AIEvaluation) 
 		return nil
 	}
 
+	log.Printf("ai poller: polling evaluation=%s provider_job=%s", item.ID, strings.TrimSpace(*item.JobID))
 	statusResult, err := s.client.GetJobStatus(ctx, *item.JobID)
 	if err != nil {
 		if isProviderJobNotFound(err) {
+			inGrace, age, grace := s.jobNotFoundGraceDecision(item)
+			if inGrace {
+				log.Printf(
+					"ai poller: evaluation=%s job=%s provider returned not found within grace period, will retry age=%s grace=%s",
+					item.ID,
+					strings.TrimSpace(*item.JobID),
+					age,
+					grace,
+				)
+				return s.markEvaluationProcessing(ctx, item)
+			}
+			log.Printf(
+				"ai poller: evaluation=%s job=%s provider returned not found and grace period elapsed age=%s grace=%s",
+				item.ID,
+				strings.TrimSpace(*item.JobID),
+				age,
+				grace,
+			)
 			return s.failEvaluation(ctx, item, "ai job not found on provider")
 		}
 		return err
@@ -447,6 +481,25 @@ func (s *Service) pollTaskTimeout() time.Duration {
 		return 30 * time.Second
 	}
 	return timeout * 2
+}
+
+func (s *Service) withinJobNotFoundGracePeriod(item *model.AIEvaluation) bool {
+	inGrace, _, _ := s.jobNotFoundGraceDecision(item)
+	return inGrace
+}
+
+func (s *Service) jobNotFoundGraceDecision(item *model.AIEvaluation) (bool, time.Duration, time.Duration) {
+	grace := s.config.JobNotFoundGrace
+	if grace <= 0 {
+		grace = 10 * time.Minute
+	}
+
+	reference := item.CreatedAt
+	if item.StartedAt != nil && !item.StartedAt.IsZero() {
+		reference = *item.StartedAt
+	}
+	age := time.Since(reference)
+	return age < grace, age, grace
 }
 
 func isProviderJobNotFound(err error) bool {

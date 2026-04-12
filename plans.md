@@ -258,6 +258,73 @@
 
 6. 联调后问题收口
 - 参数对齐问题
+
+## 8. 模型侧最小改造计划
+
+当前阶段仅改模型侧 Python 服务 `ai_eval_mock`，业务侧 Go 接口保持不变。
+
+### 8.1 目标
+
+- 继续使用 `POST /api/v1/analysis-jobs`
+- 继续由业务侧传入 `video.type=url`
+- 模型侧负责下载视频、处理任务、生成结果
+- 模型侧将任务状态和结果写入 Redis
+- 模型侧将视觉模型并发限制为 `2`
+- 视频在成功产出报告后保留 `5` 分钟
+- 结果在模型侧保留 `24` 小时，供业务侧补拉
+
+### 8.2 当前选择的方案
+
+采用折中方案：
+
+- `Redis job store + asyncio.Queue + worker pool`
+
+职责拆分：
+
+- `JobStore`
+  - 负责 job 状态、结果、TTL、恢复信息
+- `Dispatcher`
+  - 当前使用进程内 `asyncio.Queue`
+- `WorkerPool`
+  - 当前固定 `2` 个 worker
+- `Runner`
+  - 负责下载、预处理、模型调用、结果归一
+- `VideoCache`
+  - 负责本地临时文件与过期清理
+
+### 8.3 本次实施范围
+
+1. 将 `job_store.py` 从内存字典改为 Redis 实现
+2. 新增进程内队列和固定 worker 池
+3. 接入本地视频缓存目录
+4. 成功产出报告后记录视频过期时间，TTL 为 5 分钟
+5. Redis 中的 job 与 result TTL 为 24 小时
+6. 服务启动时恢复 `queued / processing` 的未完成任务
+7. 为后续升级到 Redis 队列预留 `Dispatcher` 抽象边界
+
+### 8.4 暂不纳入本次范围
+
+- 业务侧 Go 接口改动
+- 多实例任务认领
+- Redis 原生分布式队列
+- 更复杂的失败重试与死信队列
+- 真正的视觉模型多模态协议细节
+
+### 8.5 升级路径
+
+本次实现完成后，后续从方案 2 升级到方案 3 时，预期只需要：
+
+- 保留 `Redis JobStore`
+- 将 `InMemoryDispatcher` 替换为 `RedisDispatcher`
+- 调整 worker 从 Redis 队列取任务
+
+不应重写：
+
+- HTTP 接口
+- Job 状态结构
+- 结果结构
+- 视频缓存逻辑
+- Runner 主流程
 - 数据初始化问题
 - 权限边界问题
 - 上传和评分状态问题

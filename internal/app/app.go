@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 
 	"skilljudge/backend/internal/bootstrap"
@@ -127,6 +128,7 @@ func corsMiddleware() gin.HandlerFunc {
 
 func (a *App) Run() error {
 	if a.aiService != nil {
+		log.Printf("ai poller starting")
 		go a.aiService.RunPoller(context.Background())
 	}
 	addr := fmt.Sprintf(":%s", a.port)

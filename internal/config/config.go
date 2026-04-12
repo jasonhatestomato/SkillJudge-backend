@@ -72,6 +72,7 @@ type AIConfig struct {
 	APIToken          string
 	RequestTimeout    time.Duration
 	PollInterval      time.Duration
+	JobNotFoundGrace  time.Duration
 	PollBatchSize     int
 	CreateConcurrency int
 	PollConcurrency   int
@@ -135,7 +136,8 @@ func Load() (Config, error) {
 			AnalysisPath:      getEnv("AI_ANALYSIS_PATH", "/api/v1/analysis-jobs"),
 			APIToken:          getEnv("AI_API_TOKEN", ""),
 			RequestTimeout:    getEnvDuration("AI_REQUEST_TIMEOUT", 15*time.Second),
-			PollInterval:      getEnvDuration("AI_POLL_INTERVAL", 10*time.Second),
+			PollInterval:      getEnvDuration("AI_POLL_INTERVAL", 3*time.Minute),
+			JobNotFoundGrace:  getEnvDuration("AI_JOB_NOT_FOUND_GRACE_PERIOD", 10*time.Minute),
 			PollBatchSize:     getEnvInt("AI_POLL_BATCH_SIZE", 20),
 			CreateConcurrency: getEnvInt("AI_CREATE_CONCURRENCY", 5),
 			PollConcurrency:   getEnvInt("AI_POLL_CONCURRENCY", 5),

@@ -190,13 +190,7 @@ Bootstrap 约定：
 
 - [`.env.example`](/Users/jason/go/src/SkillJudge/backend/.env.example)
 
-如果本地通过 SSH 隧道连接 PostgreSQL 和 Redis，先执行：
-
-```bash
-ssh -L 15432:192.168.0.146:5432 -L 27018:192.168.0.146:27017 -L 16379:192.168.0.146:6379 root@123.60.51.11
-```
-
-然后启动服务：
+当前开发环境默认直接连接公网 PostgreSQL 和 Redis，不再依赖 SSH 隧道。确认 [`.env`](/Users/jason/go/src/SkillJudge/backend/.env) 中的 `DB_HOST`、`DB_PORT`、`REDIS_ADDR` 指向公网地址后，直接启动服务：
 
 ```bash
 cd /Users/jason/go/src/SkillJudge/backend

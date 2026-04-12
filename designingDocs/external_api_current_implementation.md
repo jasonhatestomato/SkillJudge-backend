@@ -10,6 +10,71 @@
 - 当前阶段不设计分期交付协议，仅保留可选的 `result_slices` 扩展字段
 - 业务侧当前会在视频上传确认成功后自动发起 AI 创建请求
 
+## 0. 当前阶段最小改造约束
+
+当前阶段只对模型服务做最小改造，业务侧现有接口保持不变。
+
+### 0.1 输入方式
+
+- 业务侧继续传入 `video.type=url`
+- 模型侧负责根据 URL 下载视频
+- 当前不要求业务侧先把视频上传到模型侧
+
+`video.value` 在当前阶段应理解为“模型侧可访问的下载地址”，通常是：
+
+- OBS 对象存储的签名 URL
+- 业务侧生成的短时播放 URL
+- 其他模型侧网络可达的直链地址
+
+### 0.2 模型侧缓存职责
+
+模型侧分两类缓存：
+
+- 视频临时缓存
+- 任务结果缓存
+
+#### 视频临时缓存
+
+模型侧下载完成后，视频先落本地临时目录，例如：
+
+- `/tmp/skilljudge-ai/{jobId}/source.mp4`
+
+缓存策略：
+
+- 视频缓存保留 5 分钟
+- 5 分钟从“任务成功产出报告”开始计算
+- 这样可以覆盖 Gemini 结果异常、模型超时、需要立即重试等场景
+
+#### 任务结果缓存
+
+模型侧还应保留一份短期 job 状态和结果，建议 TTL 为 24 小时。
+
+目的：
+
+- 避免业务侧在轮询成功前因网络抖动丢失结果
+- 允许业务侧在写 PG 失败后，基于 `jobId` 再次拉取结果
+
+### 0.3 模型侧存储建议
+
+当前阶段不建议模型侧引入 MongoDB。
+
+建议存储划分如下：
+
+- 本地磁盘：视频临时文件和必要的转码中间文件
+- Redis：job 状态、短期结果、缓存过期时间
+- 业务侧 PostgreSQL：最终 AI 报告和摘要字段
+
+### 0.4 最终报告存储原则
+
+最终结构化报告仍由业务侧在成功拉取结果后写入 PostgreSQL：
+
+- `ai_evaluations.result_data`
+- `ai_evaluations.total_score`
+- `videos.ai_status`
+- `videos.ai_score`
+
+模型侧不承担长期报告库职责，只提供短期补偿窗口。
+
 ## 1. 创建分析任务
 
 ### URL
@@ -68,13 +133,14 @@ Authorization: Bearer {token}
 
 ### 字段约束
 
-- `video.type`：可选 `url` 或 `path`
-- `video.value`：必填，视频可访问 URL 或 path 路径
+- `video.type`：当前固定为 `url`
+- `video.value`：必填，模型侧可访问的视频下载地址
 - `rubric.type`：当前固定为 `content`
 - `rubric.value`：必填，量规 JSON 序列化后的字符串
 - `rubricData`：可选，量规结构化 JSON
 - `metadata`：可选，附加业务字段
 - `metadata.evaluationId`：建议保留，用于业务侧和 AI 侧联调排查
+- `metadata.storagePath`：可选，仅用于排障定位，不作为模型侧直接读取对象
 - `options`：可选，当前实际会传入
   - `needStageSegmentation`
   - `needErrorPoints`
@@ -274,4 +340,36 @@ Authorization: Bearer {token}
 2. 保存 AI 侧返回的 `jobId`
 3. 定时轮询 `GET /api/v1/analysis-jobs/{job_id}` 直到状态结束
 4. 当状态为 `completed` 时，调用 `GET /api/v1/analysis-jobs/{job_id}/result`
-5. 将结果信息进行入库操作
+5. 将结果信息写入业务侧 PostgreSQL
+
+## 5. 推荐的补偿策略
+
+为避免以下情况导致结果丢失：
+
+- 模型侧已完成，但业务侧查询状态时网络异常
+- 业务侧拿到 `completed` 后，拉结果接口失败
+- 业务侧拉到结果后，写 PostgreSQL 失败
+
+当前推荐：
+
+- 模型侧将 job 状态和 result 在 Redis 中保留 24 小时
+- 业务侧保存 `jobId`
+- 业务侧写库失败时，后续可按 `jobId` 再次补拉结果
+
+## 6. 推荐的清理策略
+
+### 视频文件
+
+- 任务成功后开始计算 5 分钟 TTL
+- TTL 到期后删除本地视频缓存
+
+### 结果缓存
+
+- job 状态和 result 建议保留 24 小时
+- 到期后由模型侧清理 Redis key
+
+该策略满足当前最小改造目标：
+
+- 不引入模型侧长期数据库
+- 不改变业务侧接口形态
+- 保留短期重试与补偿能力
