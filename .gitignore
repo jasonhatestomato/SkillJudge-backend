@@ -2,4 +2,6 @@ __pycache__/
 *.pyc
 
 tools/__pycache__/
+tools/
+demo_data/
 demo_result/
