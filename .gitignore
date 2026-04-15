@@ -1,27 +1,5 @@
-.DS_Store
-.env
-*.log
-.gocache/
-.venv/
 __pycache__/
 *.pyc
 
-# Go build outputs
-/bin/
-/dist/
-/*.exe
-/*.out
-/skilljudge-backend
-
-# Editor and IDE files
-.idea/
-.vscode/
-
-# Local test assets and ad-hoc integration materials
-/test_oss/
-/test_curl/
-
-# Local AI service files
-/ai_eval_mock/.env
-/ai_eval_mock/.DS_Store
-/ai_eval_mock/dist/
+tools/__pycache__/
+demo_result/

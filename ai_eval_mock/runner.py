@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
+import re
 import time
 from datetime import timedelta
 from typing import Any
@@ -17,6 +19,7 @@ from schemas import (
     AnalysisJobRequest,
     AnalysisResult,
     ArtifactsResult,
+    DetailEvidenceResult,
     DetailGroupResult,
     DetailItemResult,
     JobRecord,
@@ -206,6 +209,7 @@ class JobRunner:
                     started_at = time.perf_counter()
                     self._logger.info("llm generation started", extra={"job_id": job.jobId, "model": self._settings.llm_model})
                     llm_data = await self._generate_llm_result(job.request, media_value)
+                    self._logger.info("llm raw result for job %s: %s", job.jobId, _json_preview(llm_data))
                     llm_data = await self._repair_llm_result(job.jobId, job.request, llm_data)
                     self._logger.info(
                         "llm generation completed",
@@ -233,16 +237,27 @@ class JobRunner:
         if not self._settings.llm_repair_enabled:
             return raw_result
 
+        candidates = _find_feedback_score_conflicts(raw_result)
+        if not candidates:
+            self._logger.info("llm repair skipped because no explicit score conflict was found", extra={"job_id": job_id})
+            return raw_result
+
         try:
-            system_prompt, user_prompt = build_repair_prompts(request, raw_result)
-            self._logger.info("llm repair started", extra={"job_id": job_id})
+            system_prompt, user_prompt = build_repair_prompts(request, raw_result, candidates)
+            self._logger.info(
+                "llm repair started",
+                extra={"job_id": job_id, "candidate_count": len(candidates)},
+            )
             repaired = await self._llm_client.generate_text_json(system_prompt, user_prompt)
-            self._logger.info("llm repair completed", extra={"job_id": job_id})
+            self._logger.info(
+                "llm repair completed",
+                extra={"job_id": job_id, "candidate_count": len(candidates)},
+            )
             return repaired
         except Exception:
             self._logger.warning(
                 "llm repair failed, keep original result",
-                extra={"job_id": job_id},
+                extra={"job_id": job_id, "candidate_count": len(candidates)},
                 exc_info=True,
             )
             return raw_result
@@ -335,9 +350,10 @@ class JobRunner:
                 if isinstance(raw_item.get("status"), str) and raw_item["status"].strip():
                     status = raw_item["status"].strip()
 
-                feedback = f"“{subtitle}”完成度较好，动作基本规范，建议继续优化细节稳定性。"
+                feedback = ""
                 if isinstance(raw_item.get("feedback"), str) and raw_item["feedback"].strip():
                     feedback = raw_item["feedback"].strip()
+                evidence = _build_detail_evidence(raw_item.get("evidence"))
 
                 items.append(
                     DetailItemResult(
@@ -346,6 +362,7 @@ class JobRunner:
                         aiScore=ai_score,
                         status=status,
                         feedback=feedback,
+                        evidence=evidence,
                     )
                 )
 
@@ -509,6 +526,27 @@ def _string_or_default(value: Any, default: str) -> str:
     return default
 
 
+def _build_detail_evidence(raw_evidence: Any) -> DetailEvidenceResult | None:
+    if not isinstance(raw_evidence, dict):
+        return None
+
+    times = [
+        item.strip()
+        for item in raw_evidence.get("times") or []
+        if isinstance(item, str) and item.strip()
+    ]
+    screenshots = [
+        item.strip()
+        for item in raw_evidence.get("screenshots") or []
+        if isinstance(item, str) and item.strip()
+    ]
+
+    if not times and not screenshots:
+        return None
+
+    return DetailEvidenceResult(times=times, screenshots=screenshots)
+
+
 def _format_hms(seconds: float) -> str:
     rounded = max(int(seconds), 0)
     hours = rounded // 3600
@@ -522,3 +560,83 @@ def _file_size_mb(path: str) -> float:
         return round(os.path.getsize(path) / 1024 / 1024, 2)
     except OSError:
         return 0.0
+
+
+def _json_preview(value: Any, max_chars: int = 6000) -> str:
+    try:
+        text = json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        text = repr(value)
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "...(truncated)"
+
+
+_EXPLICIT_SCORE_PATTERNS = (
+    re.compile(r"本项\s*([0-9]+(?:\.[0-9]+)?)\s*分"),
+    re.compile(r"得\s*([0-9]+(?:\.[0-9]+)?)\s*分"),
+    re.compile(r"计\s*([0-9]+(?:\.[0-9]+)?)\s*分"),
+    re.compile(r"给\s*([0-9]+(?:\.[0-9]+)?)\s*分"),
+)
+
+
+def _extract_explicit_score_from_feedback(feedback: Any) -> float | None:
+    if not isinstance(feedback, str):
+        return None
+    text = feedback.strip()
+    if not text:
+        return None
+    for pattern in _EXPLICIT_SCORE_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        try:
+            return float(match.group(1))
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _find_feedback_score_conflicts(raw_result: dict[str, Any]) -> list[dict[str, Any]]:
+    if not isinstance(raw_result, dict):
+        return []
+
+    raw_details = raw_result.get("details")
+    if not isinstance(raw_details, list):
+        return []
+
+    conflicts: list[dict[str, Any]] = []
+    for group_index, group in enumerate(raw_details):
+        if not isinstance(group, dict):
+            continue
+        group_title = str(group.get("title") or f"评分项{group_index + 1}")
+        group_items = group.get("items")
+        if not isinstance(group_items, list):
+            continue
+
+        for item_index, item in enumerate(group_items):
+            if not isinstance(item, dict):
+                continue
+            explicit_score = _extract_explicit_score_from_feedback(item.get("feedback"))
+            if explicit_score is None:
+                continue
+
+            current_score = item.get("aiScore")
+            if not isinstance(current_score, (int, float)):
+                continue
+
+            if abs(float(current_score) - explicit_score) < 0.01:
+                continue
+
+            conflicts.append(
+                {
+                    "groupTitle": group_title,
+                    "subtitle": str(item.get("subtitle") or f"子项{item_index + 1}"),
+                    "currentAiScore": float(current_score),
+                    "feedbackScore": explicit_score,
+                    "fullScore": float(item.get("fullScore") or 0),
+                    "feedback": str(item.get("feedback") or ""),
+                }
+            )
+
+    return conflicts

@@ -41,12 +41,18 @@ class SummaryResult(BaseModel):
     maxScore: float | None = None
 
 
+class DetailEvidenceResult(BaseModel):
+    times: list[str] = Field(default_factory=list)
+    screenshots: list[str] = Field(default_factory=list)
+
+
 class DetailItemResult(BaseModel):
     subtitle: str
     fullScore: float | None = None
     aiScore: float | None = None
     status: str | None = None
     feedback: str | None = None
+    evidence: DetailEvidenceResult | None = None
 
 
 class DetailGroupResult(BaseModel):

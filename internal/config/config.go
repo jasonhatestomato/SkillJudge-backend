@@ -136,7 +136,7 @@ func Load() (Config, error) {
 			AnalysisPath:      getEnv("AI_ANALYSIS_PATH", "/api/v1/analysis-jobs"),
 			APIToken:          getEnv("AI_API_TOKEN", ""),
 			RequestTimeout:    getEnvDuration("AI_REQUEST_TIMEOUT", 15*time.Second),
-			PollInterval:      getEnvDuration("AI_POLL_INTERVAL", 3*time.Minute),
+			PollInterval:      getEnvDuration("AI_POLL_INTERVAL", 2*time.Minute),
 			JobNotFoundGrace:  getEnvDuration("AI_JOB_NOT_FOUND_GRACE_PERIOD", 10*time.Minute),
 			PollBatchSize:     getEnvInt("AI_POLL_BATCH_SIZE", 20),
 			CreateConcurrency: getEnvInt("AI_CREATE_CONCURRENCY", 5),

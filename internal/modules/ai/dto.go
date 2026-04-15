@@ -19,11 +19,17 @@ type SummaryDTO struct {
 }
 
 type DetailItemDTO struct {
-	Subtitle  string   `json:"subtitle"`
-	FullScore *float64 `json:"fullScore,omitempty"`
-	AIScore   *float64 `json:"aiScore,omitempty"`
-	Status    *string  `json:"status,omitempty"`
-	Feedback  *string  `json:"feedback,omitempty"`
+	Subtitle  string             `json:"subtitle"`
+	FullScore *float64           `json:"fullScore,omitempty"`
+	AIScore   *float64           `json:"aiScore,omitempty"`
+	Status    *string            `json:"status,omitempty"`
+	Feedback  *string            `json:"feedback,omitempty"`
+	Evidence  *DetailEvidenceDTO `json:"evidence,omitempty"`
+}
+
+type DetailEvidenceDTO struct {
+	Times       []string `json:"times,omitempty"`
+	Screenshots []string `json:"screenshots,omitempty"`
 }
 
 type DetailGroupDTO struct {
