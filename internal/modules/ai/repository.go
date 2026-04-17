@@ -15,6 +15,10 @@ type Repository struct {
 	db *gorm.DB
 }
 
+type VideoProgressState struct {
+	ManualStatus string
+}
+
 func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
@@ -86,18 +90,19 @@ func (r *Repository) FindVideosByTaskAndIDs(ctx context.Context, taskID uuid.UUI
 	return items, nil
 }
 
-func (r *Repository) CreateAndMarkVideoProcessing(ctx context.Context, evaluation *model.AIEvaluation, videoID uuid.UUID) error {
+func (r *Repository) CreateAndMarkVideoProcessing(ctx context.Context, evaluation *model.AIEvaluation, videoID uuid.UUID, videoUpdates map[string]any) error {
 	now := time.Now()
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(evaluation).Error; err != nil {
 			return err
 		}
+		if videoUpdates == nil {
+			videoUpdates = map[string]any{}
+		}
+		videoUpdates["updated_at"] = now
 		return tx.Model(&model.Video{}).
 			Where("id = ?", videoID).
-			Updates(map[string]any{
-				"ai_status":  EvaluationStatusProcessing,
-				"updated_at": now,
-			}).Error
+			Updates(videoUpdates).Error
 	})
 }
 
@@ -147,4 +152,20 @@ func (r *Repository) ListPollingCandidates(ctx context.Context, limit int) ([]mo
 	}
 
 	return items, nil
+}
+
+func (r *Repository) FindVideoProgressState(ctx context.Context, videoID uuid.UUID) (*VideoProgressState, error) {
+	var item VideoProgressState
+	if err := r.db.WithContext(ctx).
+		Model(&model.Video{}).
+		Select("manual_status").
+		Where("id = ?", videoID).
+		First(&item).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &item, nil
 }

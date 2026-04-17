@@ -2,7 +2,9 @@ package task
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository struct {
@@ -23,6 +26,28 @@ type ListParams struct {
 	ProjectID uuid.UUID
 	Status    string
 	Keyword   string
+}
+
+type ScoreboardSummary struct {
+	TotalStudents      int64    `json:"totalStudents"`
+	CompletedStudents  int64    `json:"completedStudents"`
+	AverageAIScore     *float64 `json:"averageAIScore,omitempty"`
+	AverageManualScore *float64 `json:"averageManualScore,omitempty"`
+}
+
+type CreateAnalysisReportInput struct {
+	TaskID          uuid.UUID
+	Status          string
+	ReportFormat    string
+	FileName        *string
+	StoragePath     *string
+	PublicURL       *string
+	TemplateVersion *string
+	SnapshotData    map[string]any
+	RequestedBy     *uuid.UUID
+	StartedAt       *time.Time
+	GeneratedAt     *time.Time
+	ErrorMessage    *string
 }
 
 func NewRepository(db *gorm.DB) *Repository {
@@ -80,6 +105,205 @@ func (r *Repository) List(ctx context.Context, params ListParams) ([]model.Task,
 	return items, total, nil
 }
 
+func (r *Repository) ListScoreboard(ctx context.Context, params ScoreboardParams) ([]model.Video, int64, *ScoreboardSummary, error) {
+	query := r.scoreboardBaseQuery(ctx, params)
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, nil, err
+	}
+
+	type summaryRow struct {
+		TotalStudents      int64
+		CompletedStudents  int64
+		AverageAIScore     sql.NullFloat64
+		AverageManualScore sql.NullFloat64
+	}
+
+	var row summaryRow
+	if err := r.scoreboardBaseQuery(ctx, params).
+		Select(
+			"COUNT(*) AS total_students, " +
+				"COALESCE(SUM(CASE WHEN evaluation_status = 'completed' THEN 1 ELSE 0 END), 0) AS completed_students, " +
+				"AVG(ai_score) AS average_ai_score, " +
+				"AVG(manual_score) AS average_manual_score",
+		).
+		Scan(&row).Error; err != nil {
+		return nil, 0, nil, err
+	}
+
+	summary := &ScoreboardSummary{
+		TotalStudents:     row.TotalStudents,
+		CompletedStudents: row.CompletedStudents,
+	}
+	if row.AverageAIScore.Valid {
+		value := row.AverageAIScore.Float64
+		summary.AverageAIScore = &value
+	}
+	if row.AverageManualScore.Valid {
+		value := row.AverageManualScore.Float64
+		summary.AverageManualScore = &value
+	}
+
+	ordered := r.applyScoreboardOrder(query, params.SortBy, params.SortOrder)
+
+	var items []model.Video
+	if params.Scope == "all" {
+		if err := ordered.Find(&items).Error; err != nil {
+			return nil, 0, nil, err
+		}
+		return items, total, summary, nil
+	}
+
+	offset := (params.Page - 1) * params.PageSize
+	if err := ordered.Offset(offset).Limit(params.PageSize).Find(&items).Error; err != nil {
+		return nil, 0, nil, err
+	}
+
+	return items, total, summary, nil
+}
+
+func (r *Repository) ListAnalysisVideos(ctx context.Context, taskID uuid.UUID) ([]model.Video, error) {
+	var items []model.Video
+	err := r.db.WithContext(ctx).
+		Model(&model.Video{}).
+		Where("task_id = ?", taskID).
+		Where("status = ?", "ready").
+		Order("student_number ASC").
+		Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func (r *Repository) FindLatestAnalysisReportByTaskID(ctx context.Context, taskID uuid.UUID) (*model.TaskAnalysisReport, error) {
+	var item model.TaskAnalysisReport
+	err := r.db.WithContext(ctx).
+		Where("task_id = ?", taskID).
+		Order("created_at DESC").
+		First(&item).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &item, nil
+}
+
+func (r *Repository) CreateAnalysisReport(ctx context.Context, input CreateAnalysisReportInput) (*model.TaskAnalysisReport, error) {
+	item := &model.TaskAnalysisReport{
+		TaskID:          input.TaskID,
+		Status:          input.Status,
+		ReportFormat:    input.ReportFormat,
+		FileName:        input.FileName,
+		StoragePath:     input.StoragePath,
+		PublicURL:       input.PublicURL,
+		TemplateVersion: input.TemplateVersion,
+		SnapshotData:    input.SnapshotData,
+		RequestedBy:     input.RequestedBy,
+		StartedAt:       input.StartedAt,
+		GeneratedAt:     input.GeneratedAt,
+		ErrorMessage:    input.ErrorMessage,
+	}
+	if err := r.db.WithContext(ctx).Create(item).Error; err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+func (r *Repository) EnsureQueuedAnalysisReport(ctx context.Context, taskID uuid.UUID, requestedBy *uuid.UUID, templateVersion *string) (*model.TaskAnalysisReport, bool, error) {
+	var (
+		result  *model.TaskAnalysisReport
+		created bool
+	)
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var taskItem model.Task
+		if err := tx.Model(&model.Task{}).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id").
+			Where("id = ?", taskID).
+			First(&taskItem).Error; err != nil {
+			return err
+		}
+
+		var existing model.TaskAnalysisReport
+		err := tx.Where("task_id = ?", taskID).Order("created_at DESC").First(&existing).Error
+		switch {
+		case err == nil:
+			if existing.Status == taskAnalysisReportStatusQueued || existing.Status == taskAnalysisReportStatusProcessing || existing.Status == taskAnalysisReportStatusReady {
+				result = &existing
+				return nil
+			}
+		case !errors.Is(err, gorm.ErrRecordNotFound):
+			return err
+		}
+
+		item := &model.TaskAnalysisReport{
+			TaskID:          taskID,
+			Status:          taskAnalysisReportStatusQueued,
+			ReportFormat:    taskAnalysisReportFormatPDF,
+			TemplateVersion: templateVersion,
+			RequestedBy:     requestedBy,
+		}
+		if err := tx.Create(item).Error; err != nil {
+			return err
+		}
+		result = item
+		created = true
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+
+	return result, created, nil
+}
+
+func (r *Repository) UpdateAnalysisReport(ctx context.Context, reportID uuid.UUID, updates map[string]any) error {
+	return r.db.WithContext(ctx).
+		Model(&model.TaskAnalysisReport{}).
+		Where("id = ?", reportID).
+		Updates(updates).Error
+}
+
+func (r *Repository) ClaimAnalysisReport(ctx context.Context, reportID uuid.UUID, startedAt time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&model.TaskAnalysisReport{}).
+		Where("id = ?", reportID).
+		Where("status = ?", taskAnalysisReportStatusQueued).
+		Updates(map[string]any{
+			"status":     taskAnalysisReportStatusProcessing,
+			"started_at": startedAt,
+			"updated_at": startedAt,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func (r *Repository) ListQueuedAnalysisReports(ctx context.Context, limit int) ([]model.TaskAnalysisReport, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	var items []model.TaskAnalysisReport
+	if err := r.db.WithContext(ctx).
+		Where("status = ?", taskAnalysisReportStatusQueued).
+		Order("created_at ASC").
+		Limit(limit).
+		Find(&items).Error; err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
 func (r *Repository) RefreshVideoStats(ctx context.Context, taskID uuid.UUID) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var taskItem model.Task
@@ -130,6 +354,51 @@ func (r *Repository) baseQuery(ctx context.Context) *gorm.DB {
 		Preload("Project.School").
 		Preload("Rubric").
 		Preload("Creator")
+}
+
+func (r *Repository) scoreboardBaseQuery(ctx context.Context, params ScoreboardParams) *gorm.DB {
+	query := r.db.WithContext(ctx).
+		Model(&model.Video{}).
+		Where("task_id = ?", params.TaskID).
+		Where("status = ?", "ready")
+
+	if params.Keyword != "" {
+		keyword := "%" + strings.TrimSpace(params.Keyword) + "%"
+		query = query.Where("student_name ILIKE ? OR student_number ILIKE ?", keyword, keyword)
+	}
+
+	if params.EvaluationStatus != "" {
+		query = query.Where("evaluation_status = ?", params.EvaluationStatus)
+	}
+
+	return query
+}
+
+func (r *Repository) applyScoreboardOrder(query *gorm.DB, sortBy, sortOrder string) *gorm.DB {
+	order := "ASC"
+	if strings.EqualFold(sortOrder, "desc") {
+		order = "DESC"
+	}
+
+	column := "student_number"
+	switch sortBy {
+	case "studentName":
+		column = "student_name"
+	case "aiScore":
+		column = "ai_score"
+	case "manualScore":
+		column = "manual_score"
+	case "completedAt":
+		column = "completed_at"
+	case "studentNumber", "":
+		column = "student_number"
+	}
+
+	if column == "ai_score" || column == "manual_score" || column == "completed_at" {
+		return query.Order(fmt.Sprintf("%s %s NULLS LAST", column, order)).Order("student_number ASC")
+	}
+
+	return query.Order(fmt.Sprintf("%s %s", column, order))
 }
 
 func countTaskVideoStats(db *gorm.DB, taskID uuid.UUID) (int64, int64, error) {

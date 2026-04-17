@@ -26,10 +26,11 @@ import (
 )
 
 type App struct {
-	engine    *gin.Engine
-	host      string
-	port      string
-	aiService *ai.Service
+	engine      *gin.Engine
+	host        string
+	port        string
+	aiService   *ai.Service
+	taskService *task.Service
 }
 
 func New() (*App, error) {
@@ -61,8 +62,8 @@ func New() (*App, error) {
 	projectRepo := project.NewRepository(db)
 	projectService := project.NewService(projectRepo)
 	taskRepo := task.NewRepository(db)
-	taskService := task.NewService(taskRepo, projectRepo)
 	storageProvider := storage.NewProvider(cfg.Storage)
+	taskService := task.NewService(taskRepo, projectRepo, storageProvider)
 	aiRepo := ai.NewRepository(db)
 	aiService := ai.NewService(aiRepo, taskService, storageProvider, cfg.AI)
 	scoringRepo := scoring.NewRepository(db)
@@ -90,10 +91,11 @@ func New() (*App, error) {
 	registerRoutes(router, authService, userService, authHandler, aiHandler, systemHandler, userHandler, projectHandler, taskHandler, scoringHandler, videoHandler)
 
 	return &App{
-		engine:    router,
-		host:      cfg.HTTP.Host,
-		port:      cfg.HTTP.Port,
-		aiService: aiService,
+		engine:      router,
+		host:        cfg.HTTP.Host,
+		port:        cfg.HTTP.Port,
+		aiService:   aiService,
+		taskService: taskService,
 	}, nil
 }
 
@@ -130,6 +132,10 @@ func (a *App) Run() error {
 	if a.aiService != nil {
 		log.Printf("ai poller starting")
 		go a.aiService.RunPoller(context.Background())
+	}
+	if a.taskService != nil {
+		log.Printf("task analysis report worker starting")
+		go a.taskService.RunReportWorker(context.Background())
 	}
 	addr := fmt.Sprintf(":%s", a.port)
 	if a.host != "" {
@@ -170,6 +176,10 @@ func registerRoutes(router *gin.Engine, authService *auth.Service, userService *
 	taskGroup := api.Group("/tasks", middleware.RequireAuth(authService))
 	taskGroup.GET("/my", middleware.RequirePermission(userService, "task:read"), scoringHandler.ListMyTasks)
 	taskGroup.GET("/assignable-scorers", middleware.RequirePermission(userService, "task:update"), scoringHandler.ListAssignableScorers)
+	taskGroup.GET("/:id/scoreboard", middleware.RequirePermission(userService, "task:read"), taskHandler.GetScoreboard)
+	taskGroup.GET("/:id/analysis", middleware.RequirePermission(userService, "task:read"), taskHandler.GetAnalysis)
+	taskGroup.POST("/:id/analysis-report", middleware.RequirePermission(userService, "task:update"), taskHandler.GenerateAnalysisReport)
+	taskGroup.GET("/:id/analysis-report", middleware.RequirePermission(userService, "task:read"), taskHandler.GetAnalysisReport)
 	taskGroup.GET("/:id", middleware.RequirePermission(userService, "task:read"), func(c *gin.Context) {
 		actor := middleware.CurrentUser(c)
 		// Phase 1 keeps the API path in api.md, but scorers use this route as a

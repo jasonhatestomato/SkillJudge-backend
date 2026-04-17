@@ -24,10 +24,96 @@ Phase 2: 核心功能 (6-8周) - P1 优先级
   - 后端仅需保证相关结构化时间字段稳定返回
 Phase 3: 完善功能 (4-6周) - P2 优先级
 - 可视化报表
-- 批量导入用户
 - 权限精细化控制
 - 实验检索与学生查分
 - 性能优化
+Phase 3.5: 教学交付与报告能力（下一阶段）- 后端优先
+- 教师端任务创建流程补充评分员邀请能力
+- 教师端项目/任务完成状态聚合
+- 任务级成绩汇总与任务成绩单导出
+- 学生个人报告自动生成与 PDF 查看/下载
+- 任务级成绩分析与任务分析报告
+- 邮件通知链路接入
+
+下一阶段说明：
+- 当前项目已完成 `Phase 2` 的核心 AI 视频分析接入、任务分配、人机评分展示和时间轴交互基础能力。
+- `批量导入用户` 已由独立的管理员端服务实现，不再纳入当前教师/评分/学生业务服务的后续阶段规划。
+- 下一阶段的重点不再是继续扩充基础 AI 链路，而是围绕“教师交付使用”补齐管理、导出、报告、通知等能力。
+- 后端需要优先提供：
+  - 基于学校范围的评分员邀请与通知
+  - 项目/任务完成状态聚合字段
+  - 任务成绩汇总接口与任务成绩单导出
+  - 学生个人报告 PDF 产物查询接口
+- Redis 在本阶段不是必需依赖；如后续引入批量报告生成、邮件重试或大文件导出异步化，再作为增强方案接入。
+
+后端实施要点：
+- 不维护项目评分员池，评分员范围直接取自项目所属学校下的 scorer 用户。
+- 邀请评分员时：
+  - 若邮箱不存在，创建该学校下的 scorer 账号并发送邀请邮件；
+  - 若邮箱已存在且为同校 scorer，则直接复用并重发邀请；
+  - 若邮箱已存在但不是 scorer 或不属于该学校，则返回业务错误。
+- 项目列表、任务列表补充：
+  - `allVideosCompleted`
+  - `totalVideos`
+  - `completedVideos`
+  - `completionRate`
+- 单视频完成判定：
+  - `manual_status = submitted`
+  - 且 `ai_status = completed`
+- 新增任务成绩汇总接口：
+  - `GET /api/v1/tasks/:taskId/scoreboard`
+  - 返回字段：
+    - 学生姓名
+    - 学号
+    - AI 分数
+    - 人工分数
+    - AI 状态
+    - 人工状态
+    - 完成时间
+- 任务成绩单导出：
+  - 当前阶段由前端基于 `GET /api/v1/tasks/:taskId/scoreboard` 的实时查询结果直接导出
+- 新增任务分析接口：
+  - `GET /api/v1/tasks/:taskId/analysis`
+  - 仅当 `allVideosCompleted = true` 时允许访问
+- 新增任务分析报告接口：
+  - `POST /api/v1/tasks/:taskId/analysis-report`
+  - `GET /api/v1/tasks/:taskId/analysis-report`
+  - 仅当 `allVideosCompleted = true` 时允许生成或查看
+- 新增学生个人报告接口：
+  - 教师/管理员/评分员侧：
+    - `GET /api/v1/videos/:videoId/student-report`
+  - 学生本人侧：
+    - `GET /api/v1/students/me/videos/:videoId/student-report`
+- 报告生成机制：
+  - 不提供前端手动触发生成接口
+  - AI 结果落库后，由后端异步执行模板拼装、PDF 渲染和 OSS 上传
+  - 当前阶段暂不支持重生成
+  - 报告模板字段和版式细节仍需与 AI 侧进一步确认；当前先稳定查询接口和状态机，供前端联调开发
+- 报告状态枚举：
+  - `processing`
+  - `ready`
+  - `failed`
+- 报告查询接口返回字段（前后端联调基线）：
+  - `videoId`
+  - `evaluationStatus`
+  - `reportStatus`
+  - `reportType` 固定为 `pdf`
+  - `url`
+  - `fileName`
+  - `generatedAt`
+  - `errorMessage`（仅 `failed` 时返回）
+- 报告访问方式：
+  - OSS 当前按公共读处理
+  - 后端鉴权通过后，仅返回报告 URL 和元数据，不直接回传文件流
+  - 前端使用同一个 `url` 完成预览和下载，不拆分 `previewUrl` / `downloadUrl`
+- `GET /student-report` 请求约定：
+  - request body 为空
+  - 需要鉴权
+  - 教师/管理员/评分员需通过视频/任务可读范围校验
+  - 学生仅可访问本人视频对应的报告
+- 报告生成依赖：
+  - 正式报告默认依赖视频整体完成态
+  - 即 `evaluation_status = completed` 后，才允许生成最终 PDF 报告
 Phase 4: 扩展功能 (按需) - P3 优先级
 - 云端上传
 - 多维度数据分析

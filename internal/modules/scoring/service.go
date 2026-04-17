@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"skilljudge/backend/internal/domain/evaluation"
 	"skilljudge/backend/internal/model"
 	"skilljudge/backend/internal/modules/ai"
 	"skilljudge/backend/internal/modules/task"
@@ -135,11 +136,8 @@ func (s *Service) SubmitTask(ctx context.Context, actor user.UserContext, id uui
 	}
 
 	now := time.Now()
-	if item.EvaluationStatus == VideoEvaluationStatusPending {
-		item.EvaluationStatus = VideoEvaluationStatusInProgress
-	}
 	if item.ManualStatus == VideoManualStatusPending {
-		item.ManualStatus = VideoManualStatusInProgress
+		item.ManualStatus = evaluation.ManualStatusInProgress
 	}
 
 	// videos keeps the latest summary state, while manual_evaluations stores the
@@ -153,9 +151,9 @@ func (s *Service) SubmitTask(ctx context.Context, actor user.UserContext, id uui
 	}
 
 	item.ManualScore = &input.TotalScore
-	item.ManualStatus = VideoManualStatusSubmitted
-	item.EvaluationStatus = VideoEvaluationStatusCompleted
-	item.CompletedAt = &now
+	item.ManualStatus = evaluation.ManualStatusSubmitted
+	item.EvaluationStatus = evaluation.ResolveOverallStatus(item.ManualStatus, item.AIStatus)
+	item.CompletedAt = evaluation.ResolveCompletedAt(item.EvaluationStatus, now)
 
 	return toSubmitTaskResult(item, manual), nil
 }
@@ -200,7 +198,7 @@ func (s *Service) AssignScorers(ctx context.Context, actor user.UserContext, inp
 	assignedAt := time.Now()
 	// Phase 1 assignment is single-review only: one video maps to one scorer at
 	// any moment, and status immediately becomes pending manual evaluation.
-	if err := s.repo.AssignScorers(ctx, assignments, assignedAt); err != nil {
+	if err := s.repo.AssignScorers(ctx, videos, assignments, assignedAt); err != nil {
 		return nil, err
 	}
 
@@ -218,8 +216,8 @@ func (s *Service) AssignScorers(ctx context.Context, actor user.UserContext, inp
 
 		videoItem.ScorerID = &scorerID
 		videoItem.Scorer = scorerItem
-		videoItem.EvaluationStatus = VideoEvaluationStatusPending
-		videoItem.ManualStatus = VideoManualStatusPending
+		videoItem.ManualStatus = evaluation.ManualStatusPending
+		videoItem.EvaluationStatus = evaluation.ResolveOverallStatus(videoItem.ManualStatus, videoItem.AIStatus)
 		videoItem.AssignedAt = &assignedAt
 		assigned = append(assigned, toAssignedTaskDTO(videoItem, scorerItem))
 	}

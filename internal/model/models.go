@@ -175,14 +175,39 @@ type Task struct {
 	CompletedVideos int `gorm:"default:0"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
-	Metadata        map[string]any `gorm:"type:jsonb;serializer:json"`
-	Project         *Project       `gorm:"foreignKey:ProjectID"`
-	Rubric          *ScoringRubric `gorm:"foreignKey:RubricID"`
-	Creator         *User          `gorm:"foreignKey:CreatorID"`
+	Metadata        map[string]any       `gorm:"type:jsonb;serializer:json"`
+	Project         *Project             `gorm:"foreignKey:ProjectID"`
+	Rubric          *ScoringRubric       `gorm:"foreignKey:RubricID"`
+	Creator         *User                `gorm:"foreignKey:CreatorID"`
+	AnalysisReports []TaskAnalysisReport `gorm:"foreignKey:TaskID"`
 }
 
 func (Task) TableName() string {
 	return "tasks"
+}
+
+type TaskAnalysisReport struct {
+	ID              uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	TaskID          uuid.UUID      `gorm:"type:uuid;not null;index"`
+	Status          string         `gorm:"size:20;not null;index"`
+	ReportFormat    string         `gorm:"size:20;not null;default:pdf"`
+	FileName        *string        `gorm:"size:255"`
+	StoragePath     *string        `gorm:"size:1000"`
+	PublicURL       *string        `gorm:"size:1000"`
+	TemplateVersion *string        `gorm:"size:50"`
+	SnapshotData    map[string]any `gorm:"type:jsonb;serializer:json"`
+	RequestedBy     *uuid.UUID     `gorm:"type:uuid;index"`
+	StartedAt       *time.Time
+	GeneratedAt     *time.Time
+	ErrorMessage    *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	Task            *Task `gorm:"foreignKey:TaskID"`
+	Requester       *User `gorm:"foreignKey:RequestedBy"`
+}
+
+func (TaskAnalysisReport) TableName() string {
+	return "task_analysis_reports"
 }
 
 type RubricSubItem struct {

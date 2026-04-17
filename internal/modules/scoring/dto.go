@@ -3,6 +3,7 @@ package scoring
 import (
 	"time"
 
+	"skilljudge/backend/internal/domain/evaluation"
 	"skilljudge/backend/internal/model"
 
 	"github.com/google/uuid"
@@ -99,14 +100,17 @@ type MyTaskRubricDTO struct {
 }
 
 type MyTaskListItemDTO struct {
-	ID         uuid.UUID         `json:"id"`
-	Project    *MyTaskProjectDTO `json:"project,omitempty"`
-	Task       *MyTaskTaskDTO    `json:"task,omitempty"`
-	Video      MyTaskVideoDTO    `json:"video"`
-	Rubric     *MyTaskRubricDTO  `json:"rubric,omitempty"`
-	Status     string            `json:"status"`
-	Deadline   *time.Time        `json:"deadline,omitempty"`
-	AssignedAt *time.Time        `json:"assignedAt,omitempty"`
+	ID               uuid.UUID         `json:"id"`
+	Project          *MyTaskProjectDTO `json:"project,omitempty"`
+	Task             *MyTaskTaskDTO    `json:"task,omitempty"`
+	Video            MyTaskVideoDTO    `json:"video"`
+	Rubric           *MyTaskRubricDTO  `json:"rubric,omitempty"`
+	Status           string            `json:"status"`
+	ManualStatus     string            `json:"manualStatus"`
+	AIStatus         string            `json:"aiStatus"`
+	EvaluationStatus string            `json:"evaluationStatus"`
+	Deadline         *time.Time        `json:"deadline,omitempty"`
+	AssignedAt       *time.Time        `json:"assignedAt,omitempty"`
 }
 
 type MyTasksPagination struct {
@@ -162,6 +166,9 @@ type ScoringTaskDetailDTO struct {
 	AIEvaluation     any                             `json:"aiEvaluation,omitempty"`
 	ManualEvaluation *ScoringTaskManualEvaluationDTO `json:"manualEvaluation,omitempty"`
 	Status           string                          `json:"status"`
+	ManualStatus     string                          `json:"manualStatus"`
+	AIStatus         string                          `json:"aiStatus"`
+	EvaluationStatus string                          `json:"evaluationStatus"`
 	Deadline         *time.Time                      `json:"deadline,omitempty"`
 	AssignedAt       *time.Time                      `json:"assignedAt,omitempty"`
 }
@@ -181,6 +188,9 @@ type SubmitTaskComparisonDTO struct {
 type SubmitTaskResult struct {
 	ID               uuid.UUID                       `json:"id"`
 	Status           string                          `json:"status"`
+	ManualStatus     string                          `json:"manualStatus"`
+	AIStatus         string                          `json:"aiStatus"`
+	EvaluationStatus string                          `json:"evaluationStatus"`
 	ManualEvaluation *ScoringTaskManualEvaluationDTO `json:"manualEvaluation,omitempty"`
 	Comparison       *SubmitTaskComparisonDTO        `json:"comparison,omitempty"`
 }
@@ -218,8 +228,11 @@ func toMyTaskListItemDTO(video *model.Video, playURL *string) MyTaskListItemDTO 
 			Status:           video.Status,
 			PlayURL:          playURL,
 		},
-		Status:     video.EvaluationStatus,
-		AssignedAt: video.AssignedAt,
+		Status:           evaluation.ResolveScorerTaskStatus(video.ManualStatus),
+		ManualStatus:     video.ManualStatus,
+		AIStatus:         video.AIStatus,
+		EvaluationStatus: video.EvaluationStatus,
+		AssignedAt:       video.AssignedAt,
 	}
 
 	project := video.Project
@@ -263,10 +276,13 @@ func toScoringTaskDetailDTO(video *model.Video, manual *model.ManualEvaluation, 
 			OriginalFilename: video.OriginalFilename,
 			Status:           video.Status,
 		},
-		AIEvaluation: aiEvaluation,
-		Status:       video.EvaluationStatus,
-		Deadline:     nil,
-		AssignedAt:   video.AssignedAt,
+		AIEvaluation:     aiEvaluation,
+		Status:           evaluation.ResolveScorerTaskStatus(video.ManualStatus),
+		ManualStatus:     video.ManualStatus,
+		AIStatus:         video.AIStatus,
+		EvaluationStatus: video.EvaluationStatus,
+		Deadline:         nil,
+		AssignedAt:       video.AssignedAt,
 	}
 
 	project := video.Project
@@ -310,8 +326,11 @@ func toScoringTaskDetailDTO(video *model.Video, manual *model.ManualEvaluation, 
 
 func toSubmitTaskResult(video *model.Video, manual *model.ManualEvaluation) *SubmitTaskResult {
 	result := &SubmitTaskResult{
-		ID:     video.ID,
-		Status: video.EvaluationStatus,
+		ID:               video.ID,
+		Status:           evaluation.ResolveScorerTaskStatus(video.ManualStatus),
+		ManualStatus:     video.ManualStatus,
+		AIStatus:         video.AIStatus,
+		EvaluationStatus: video.EvaluationStatus,
 	}
 	if manual != nil {
 		result.ManualEvaluation = &ScoringTaskManualEvaluationDTO{

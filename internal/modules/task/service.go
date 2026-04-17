@@ -8,6 +8,7 @@ import (
 	"skilljudge/backend/internal/model"
 	"skilljudge/backend/internal/modules/project"
 	"skilljudge/backend/internal/modules/user"
+	"skilljudge/backend/internal/platform/storage"
 
 	"github.com/google/uuid"
 )
@@ -15,6 +16,7 @@ import (
 type Service struct {
 	repo        *Repository
 	projectRepo *project.Repository
+	storage     storage.Provider
 }
 
 type AccessLevel string
@@ -35,8 +37,19 @@ type CreateTaskInput struct {
 	Metadata    map[string]any `json:"metadata"`
 }
 
-func NewService(repo *Repository, projectRepo *project.Repository) *Service {
-	return &Service{repo: repo, projectRepo: projectRepo}
+type ScoreboardParams struct {
+	TaskID           uuid.UUID
+	Page             int
+	PageSize         int
+	Keyword          string
+	Scope            string
+	EvaluationStatus string
+	SortBy           string
+	SortOrder        string
+}
+
+func NewService(repo *Repository, projectRepo *project.Repository, provider storage.Provider) *Service {
+	return &Service{repo: repo, projectRepo: projectRepo, storage: provider}
 }
 
 func (s *Service) Create(ctx context.Context, actor user.UserContext, input CreateTaskInput) (*TaskDTO, error) {
@@ -146,6 +159,73 @@ func (s *Service) GetByID(ctx context.Context, actor user.UserContext, taskID uu
 	}
 
 	return ToTaskDTO(resolved.Item), nil
+}
+
+func (s *Service) GetScoreboard(ctx context.Context, actor user.UserContext, params ScoreboardParams) (*ScoreboardResult, error) {
+	resolved, err := s.Resolve(ctx, actor, params.TaskID, AccessRead)
+	if err != nil {
+		return nil, err
+	}
+
+	if params.Page <= 0 {
+		params.Page = 1
+	}
+	if params.PageSize <= 0 {
+		params.PageSize = 20
+	}
+	if params.Scope == "" {
+		params.Scope = "page"
+	}
+	if params.SortOrder == "" {
+		params.SortOrder = "asc"
+	}
+
+	items, total, summary, err := s.repo.ListScoreboard(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	resultItems := make([]ScoreboardItemDTO, 0, len(items))
+	for i := range items {
+		resultItems = append(resultItems, ToScoreboardItemDTO(&items[i]))
+	}
+
+	page := params.Page
+	pageSize := params.PageSize
+	totalPages := 0
+	if params.Scope == "all" {
+		page = 1
+		pageSize = int(total)
+		if pageSize == 0 {
+			pageSize = len(resultItems)
+		}
+		if pageSize == 0 {
+			pageSize = 1
+		}
+		totalPages = 1
+	} else {
+		totalPages = int(math.Ceil(float64(total) / float64(params.PageSize)))
+		if totalPages == 0 {
+			totalPages = 1
+		}
+	}
+
+	return &ScoreboardResult{
+		Task: ToScoreboardTaskDTO(resolved.Item),
+		Summary: ScoreboardSummaryDTO{
+			TotalStudents:      summary.TotalStudents,
+			CompletedStudents:  summary.CompletedStudents,
+			AverageAIScore:     summary.AverageAIScore,
+			AverageManualScore: summary.AverageManualScore,
+		},
+		Items: resultItems,
+		Pagination: Pagination{
+			Page:       page,
+			PageSize:   pageSize,
+			Total:      total,
+			TotalPages: totalPages,
+		},
+	}, nil
 }
 
 func (s *Service) Resolve(ctx context.Context, actor user.UserContext, taskID uuid.UUID, access AccessLevel) (*Context, error) {

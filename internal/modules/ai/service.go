@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"skilljudge/backend/internal/config"
+	"skilljudge/backend/internal/domain/evaluation"
 	"skilljudge/backend/internal/model"
 	"skilljudge/backend/internal/modules/task"
 	"skilljudge/backend/internal/modules/user"
@@ -199,31 +200,38 @@ func (s *Service) createForResolvedVideo(ctx context.Context, item *model.Video,
 	}
 
 	now := time.Now()
-	evaluation := &model.AIEvaluation{
+	evalRecord := &model.AIEvaluation{
 		TaskID:    *item.TaskID,
 		VideoID:   item.ID,
 		Status:    EvaluationStatusProcessing,
 		StartedAt: &now,
 	}
-	if err := s.repo.CreateAndMarkVideoProcessing(ctx, evaluation, item.ID); err != nil {
+	if err := s.repo.CreateAndMarkVideoProcessing(ctx, evalRecord, item.ID, s.buildVideoStatusUpdates(item.ManualStatus, evaluation.AIStatusProcessing, now)); err != nil {
 		return nil, err
 	}
-	if err := s.dispatchCreateJob(ctx, evaluation, item); err != nil {
+	if err := s.refreshTaskVideoStats(ctx, evalRecord.TaskID); err != nil {
+		return nil, err
+	}
+	if err := s.dispatchCreateJob(ctx, evalRecord, item); err != nil {
 		failedAt := time.Now()
 		failureMessage := err.Error()
-		_ = s.repo.UpdateEvaluationAndVideo(ctx, evaluation.ID, map[string]any{
+		overallStatus := evaluation.ResolveOverallStatus(item.ManualStatus, evaluation.AIStatusFailed)
+		_ = s.repo.UpdateEvaluationAndVideo(ctx, evalRecord.ID, map[string]any{
 			"status":        EvaluationStatusFailed,
 			"error_message": failureMessage,
 			"completed_at":  failedAt,
 			"updated_at":    failedAt,
 		}, map[string]any{
-			"ai_status":  EvaluationStatusFailed,
-			"updated_at": failedAt,
+			"ai_status":         evaluation.AIStatusFailed,
+			"evaluation_status": overallStatus,
+			"completed_at":      evaluation.ResolveCompletedAt(overallStatus, failedAt),
+			"updated_at":        failedAt,
 		})
+		_ = s.refreshTaskVideoStats(ctx, evalRecord.TaskID)
 		return nil, err
 	}
 
-	return toEvaluationDTO(evaluation), nil
+	return toEvaluationDTO(evalRecord), nil
 }
 
 func (s *Service) dispatchCreateJob(ctx context.Context, evaluation *model.AIEvaluation, item *model.Video) error {
@@ -405,6 +413,10 @@ func (s *Service) pollEvaluation(ctx context.Context, item *model.AIEvaluation) 
 
 func (s *Service) markEvaluationProcessing(ctx context.Context, item *model.AIEvaluation) error {
 	now := time.Now()
+	manualStatus, err := s.resolveManualStatus(ctx, item.VideoID)
+	if err != nil {
+		return err
+	}
 	updates := map[string]any{
 		"updated_at": now,
 	}
@@ -412,10 +424,10 @@ func (s *Service) markEvaluationProcessing(ctx context.Context, item *model.AIEv
 		updates["started_at"] = now
 	}
 
-	return s.repo.UpdateEvaluationAndVideo(ctx, item.ID, updates, map[string]any{
-		"ai_status":  EvaluationStatusProcessing,
-		"updated_at": now,
-	})
+	if err := s.repo.UpdateEvaluationAndVideo(ctx, item.ID, updates, s.buildVideoStatusUpdates(manualStatus, evaluation.AIStatusProcessing, now)); err != nil {
+		return err
+	}
+	return s.refreshTaskVideoStats(ctx, item.TaskID)
 }
 
 func (s *Service) completeEvaluationFromProvider(ctx context.Context, item *model.AIEvaluation, jobID string) error {
@@ -428,13 +440,18 @@ func (s *Service) completeEvaluationFromProvider(ctx context.Context, item *mode
 	}
 
 	now := time.Now()
+	manualStatus, err := s.resolveManualStatus(ctx, item.VideoID)
+	if err != nil {
+		return err
+	}
 	resultData, err := providerResultData(result)
 	if err != nil {
 		return err
 	}
 	totalScore := extractTotalScore(result)
+	overallStatus := evaluation.ResolveOverallStatus(manualStatus, evaluation.AIStatusCompleted)
 
-	return s.repo.UpdateEvaluationAndVideo(ctx, item.ID, map[string]any{
+	if err := s.repo.UpdateEvaluationAndVideo(ctx, item.ID, map[string]any{
 		"status":        EvaluationStatusCompleted,
 		"model_version": result.ModelVersion,
 		"total_score":   totalScore,
@@ -442,23 +459,38 @@ func (s *Service) completeEvaluationFromProvider(ctx context.Context, item *mode
 		"completed_at":  now,
 		"updated_at":    now,
 	}, map[string]any{
-		"ai_status":  EvaluationStatusCompleted,
-		"ai_score":   totalScore,
-		"updated_at": now,
-	})
+		"ai_status":         evaluation.AIStatusCompleted,
+		"ai_score":          totalScore,
+		"evaluation_status": overallStatus,
+		"completed_at":      evaluation.ResolveCompletedAt(overallStatus, now),
+		"updated_at":        now,
+	}); err != nil {
+		return err
+	}
+	return s.refreshTaskVideoStats(ctx, item.TaskID)
 }
 
 func (s *Service) failEvaluation(ctx context.Context, item *model.AIEvaluation, message string) error {
 	now := time.Now()
-	return s.repo.UpdateEvaluationAndVideo(ctx, item.ID, map[string]any{
+	manualStatus, err := s.resolveManualStatus(ctx, item.VideoID)
+	if err != nil {
+		return err
+	}
+	overallStatus := evaluation.ResolveOverallStatus(manualStatus, evaluation.AIStatusFailed)
+	if err := s.repo.UpdateEvaluationAndVideo(ctx, item.ID, map[string]any{
 		"status":        EvaluationStatusFailed,
 		"error_message": message,
 		"completed_at":  now,
 		"updated_at":    now,
 	}, map[string]any{
-		"ai_status":  EvaluationStatusFailed,
-		"updated_at": now,
-	})
+		"ai_status":         evaluation.AIStatusFailed,
+		"evaluation_status": overallStatus,
+		"completed_at":      evaluation.ResolveCompletedAt(overallStatus, now),
+		"updated_at":        now,
+	}); err != nil {
+		return err
+	}
+	return s.refreshTaskVideoStats(ctx, item.TaskID)
 }
 
 func (s *Service) createConcurrency() int {
@@ -613,6 +645,34 @@ func normalizeProviderStatus(status string) string {
 	default:
 		return ""
 	}
+}
+
+func (s *Service) resolveManualStatus(ctx context.Context, videoID uuid.UUID) (string, error) {
+	state, err := s.repo.FindVideoProgressState(ctx, videoID)
+	if err != nil {
+		return "", err
+	}
+	if state == nil || strings.TrimSpace(state.ManualStatus) == "" {
+		return evaluation.ManualStatusPending, nil
+	}
+	return state.ManualStatus, nil
+}
+
+func (s *Service) buildVideoStatusUpdates(manualStatus, aiStatus string, now time.Time) map[string]any {
+	overallStatus := evaluation.ResolveOverallStatus(manualStatus, aiStatus)
+	return map[string]any{
+		"ai_status":         aiStatus,
+		"evaluation_status": overallStatus,
+		"completed_at":      evaluation.ResolveCompletedAt(overallStatus, now),
+		"updated_at":        now,
+	}
+}
+
+func (s *Service) refreshTaskVideoStats(ctx context.Context, taskID uuid.UUID) error {
+	if taskID == uuid.Nil {
+		return nil
+	}
+	return s.taskService.RefreshVideoStats(ctx, taskID)
 }
 
 func providerFailureMessage(status string, message *string) string {

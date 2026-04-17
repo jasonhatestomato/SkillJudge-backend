@@ -57,9 +57,21 @@ type CompleteMultipartUploadResult struct {
 	StoragePath string
 }
 
+type PutObjectInput struct {
+	ObjectKey   string
+	ContentType string
+	Body        []byte
+}
+
+type PutObjectResult struct {
+	StorageURL  string
+	StoragePath string
+}
+
 type Provider interface {
 	CreateMultipartUpload(ctx context.Context, input CreateMultipartUploadInput) (*MultipartUploadSession, error)
 	CompleteMultipartUpload(ctx context.Context, input CompleteMultipartUploadInput) (*CompleteMultipartUploadResult, error)
+	PutObject(ctx context.Context, input PutObjectInput) (*PutObjectResult, error)
 	DeleteObject(ctx context.Context, objectKey string) error
 	GeneratePlayURL(ctx context.Context, objectKey string, expires time.Duration) (string, error)
 }
@@ -119,6 +131,13 @@ func (p *mockProvider) CreateMultipartUpload(_ context.Context, input CreateMult
 
 func (p *mockProvider) CompleteMultipartUpload(_ context.Context, input CompleteMultipartUploadInput) (*CompleteMultipartUploadResult, error) {
 	return &CompleteMultipartUploadResult{
+		StorageURL:  fmt.Sprintf("%s/%s/%s", p.publicBaseURL, p.bucket, input.ObjectKey),
+		StoragePath: input.ObjectKey,
+	}, nil
+}
+
+func (p *mockProvider) PutObject(_ context.Context, input PutObjectInput) (*PutObjectResult, error) {
+	return &PutObjectResult{
 		StorageURL:  fmt.Sprintf("%s/%s/%s", p.publicBaseURL, p.bucket, input.ObjectKey),
 		StoragePath: input.ObjectKey,
 	}, nil
@@ -222,6 +241,24 @@ func (p *obsProvider) CompleteMultipartUpload(_ context.Context, input CompleteM
 	}
 
 	return &CompleteMultipartUploadResult{
+		StorageURL:  fmt.Sprintf("%s/%s", p.publicBaseURL, input.ObjectKey),
+		StoragePath: input.ObjectKey,
+	}, nil
+}
+
+func (p *obsProvider) PutObject(_ context.Context, input PutObjectInput) (*PutObjectResult, error) {
+	req := &obs.PutObjectInput{}
+	req.Bucket = p.bucket
+	req.Key = input.ObjectKey
+	req.Body = bytes.NewReader(input.Body)
+	if input.ContentType != "" {
+		req.ContentType = input.ContentType
+	}
+	if _, err := p.client.PutObject(req); err != nil {
+		return nil, fmt.Errorf("put object: %w", err)
+	}
+
+	return &PutObjectResult{
 		StorageURL:  fmt.Sprintf("%s/%s", p.publicBaseURL, input.ObjectKey),
 		StoragePath: input.ObjectKey,
 	}, nil

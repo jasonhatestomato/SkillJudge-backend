@@ -137,3 +137,121 @@ func (h *Handler) Get(c *gin.Context) {
 
 	response.Success(c, http.StatusOK, result)
 }
+
+func (h *Handler) GetScoreboard(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	taskID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid task id", nil)
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+
+	result, err := h.service.GetScoreboard(c.Request.Context(), actor, ScoreboardParams{
+		TaskID:           taskID,
+		Page:             page,
+		PageSize:         pageSize,
+		Keyword:          c.Query("keyword"),
+		Scope:            c.DefaultQuery("scope", "page"),
+		EvaluationStatus: c.Query("evaluationStatus"),
+		SortBy:           c.Query("sortBy"),
+		SortOrder:        c.Query("sortOrder"),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTaskNotFound):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, ErrTaskProjectScope), errors.Is(err, ErrTaskRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to load task scoreboard", nil)
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, result)
+}
+
+func (h *Handler) GetAnalysis(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	taskID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid task id", nil)
+		return
+	}
+
+	result, err := h.service.GetAnalysis(c.Request.Context(), actor, taskID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTaskNotFound):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, ErrTaskAnalysisNotReady):
+			response.Error(c, http.StatusConflict, err.Error(), nil)
+		case errors.Is(err, ErrTaskProjectScope), errors.Is(err, ErrTaskRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to load task analysis", nil)
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, result)
+}
+
+func (h *Handler) GenerateAnalysisReport(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	taskID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid task id", nil)
+		return
+	}
+
+	result, err := h.service.GenerateAnalysisReport(c.Request.Context(), actor, taskID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTaskNotFound):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, ErrTaskAnalysisNotReady):
+			response.Error(c, http.StatusConflict, err.Error(), nil)
+		case errors.Is(err, ErrTaskProjectScope), errors.Is(err, ErrTaskRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to generate task analysis report", nil)
+		}
+		return
+	}
+
+	statusCode := http.StatusAccepted
+	if result.ReportStatus == taskAnalysisReportStatusReady {
+		statusCode = http.StatusOK
+	}
+	response.Success(c, statusCode, result)
+}
+
+func (h *Handler) GetAnalysisReport(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	taskID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid task id", nil)
+		return
+	}
+
+	result, err := h.service.GetAnalysisReport(c.Request.Context(), actor, taskID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTaskNotFound), errors.Is(err, ErrTaskAnalysisReportNotFound):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, ErrTaskAnalysisNotReady):
+			response.Error(c, http.StatusConflict, err.Error(), nil)
+		case errors.Is(err, ErrTaskProjectScope), errors.Is(err, ErrTaskRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to load task analysis report", nil)
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, result)
+}

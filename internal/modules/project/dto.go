@@ -10,23 +10,25 @@ import (
 )
 
 type ProjectDTO struct {
-	ID              uuid.UUID       `json:"id"`
-	Name            string          `json:"name"`
-	Description     *string         `json:"description,omitempty"`
-	Status          string          `json:"status"`
-	Deadline        *time.Time      `json:"deadline,omitempty"`
-	StartDate       *time.Time      `json:"startDate,omitempty"`
-	EndDate         *time.Time      `json:"endDate,omitempty"`
-	Tags            []string        `json:"tags,omitempty"`
-	ExperimentType  *string         `json:"experimentType,omitempty"`
-	GradeLevel      *string         `json:"gradeLevel,omitempty"`
-	Subject         *string         `json:"subject,omitempty"`
-	TotalVideos     int             `json:"totalVideos"`
-	CompletedVideos int             `json:"completedVideos"`
-	School          *user.SchoolDTO `json:"school,omitempty"`
-	Creator         *ProjectUserDTO `json:"creator,omitempty"`
-	CreatedAt       time.Time       `json:"createdAt"`
-	UpdatedAt       time.Time       `json:"updatedAt"`
+	ID                 uuid.UUID       `json:"id"`
+	Name               string          `json:"name"`
+	Description        *string         `json:"description,omitempty"`
+	Status             string          `json:"status"`
+	Deadline           *time.Time      `json:"deadline,omitempty"`
+	StartDate          *time.Time      `json:"startDate,omitempty"`
+	EndDate            *time.Time      `json:"endDate,omitempty"`
+	Tags               []string        `json:"tags,omitempty"`
+	ExperimentType     *string         `json:"experimentType,omitempty"`
+	GradeLevel         *string         `json:"gradeLevel,omitempty"`
+	Subject            *string         `json:"subject,omitempty"`
+	TotalVideos        int             `json:"totalVideos"`
+	CompletedVideos    int             `json:"completedVideos"`
+	AllVideosCompleted bool            `json:"allVideosCompleted"`
+	CompletionRate     float64         `json:"completionRate"`
+	School             *user.SchoolDTO `json:"school,omitempty"`
+	Creator            *ProjectUserDTO `json:"creator,omitempty"`
+	CreatedAt          time.Time       `json:"createdAt"`
+	UpdatedAt          time.Time       `json:"updatedAt"`
 }
 
 type ProjectUserDTO struct {
@@ -49,21 +51,23 @@ type ListProjectsResult struct {
 
 func ToProjectDTO(item *model.Project) *ProjectDTO {
 	dto := &ProjectDTO{
-		ID:              item.ID,
-		Name:            item.Name,
-		Description:     item.Description,
-		Status:          item.Status,
-		Deadline:        item.Deadline,
-		StartDate:       item.StartDate,
-		EndDate:         item.EndDate,
-		Tags:            []string(item.Tags),
-		ExperimentType:  item.ExperimentType,
-		GradeLevel:      item.GradeLevel,
-		Subject:         item.Subject,
-		TotalVideos:     item.TotalVideos,
-		CompletedVideos: item.CompletedVideos,
-		CreatedAt:       item.CreatedAt,
-		UpdatedAt:       item.UpdatedAt,
+		ID:                 item.ID,
+		Name:               item.Name,
+		Description:        item.Description,
+		Status:             item.Status,
+		Deadline:           item.Deadline,
+		StartDate:          item.StartDate,
+		EndDate:            item.EndDate,
+		Tags:               []string(item.Tags),
+		ExperimentType:     item.ExperimentType,
+		GradeLevel:         item.GradeLevel,
+		Subject:            item.Subject,
+		TotalVideos:        item.TotalVideos,
+		CompletedVideos:    item.CompletedVideos,
+		AllVideosCompleted: item.TotalVideos > 0 && item.TotalVideos == item.CompletedVideos,
+		CompletionRate:     completionRate(item.TotalVideos, item.CompletedVideos),
+		CreatedAt:          item.CreatedAt,
+		UpdatedAt:          item.UpdatedAt,
 	}
 
 	if item.School != nil {
@@ -82,4 +86,11 @@ func ToProjectDTO(item *model.Project) *ProjectDTO {
 	}
 
 	return dto
+}
+
+func completionRate(total, completed int) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return float64(completed) * 100 / float64(total)
 }

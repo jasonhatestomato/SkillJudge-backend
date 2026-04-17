@@ -13,6 +13,31 @@ import (
 	"skilljudge/backend/internal/config"
 )
 
+var providerResponseAliases = map[string]string{
+	"job_id":                  "jobId",
+	"accepted_at":             "acceptedAt",
+	"evaluation_id":           "evaluationId",
+	"model_version":           "modelVersion",
+	"overall_description":     "overallDescription",
+	"max_score":               "maxScore",
+	"full_score":              "fullScore",
+	"ai_score":                "aiScore",
+	"video_stages":            "videoStages",
+	"video_points":            "videoPoints",
+	"stage_id":                "stageId",
+	"stage_type":              "stageType",
+	"start_sec":               "startSec",
+	"end_sec":                 "endSec",
+	"start_time":              "startTime",
+	"end_time":                "endTime",
+	"point_id":                "pointId",
+	"evidence_id":             "evidenceId",
+	"time_sec":                "timeSec",
+	"report_html_url":         "reportHtmlUrl",
+	"analysis_json_url":       "analysisJsonUrl",
+	"evidence_index_json_url": "evidenceIndexJsonUrl",
+}
+
 type Client struct {
 	httpClient   *http.Client
 	baseURL      string
@@ -142,7 +167,7 @@ func (c *Client) CreateJob(ctx context.Context, input CreateJobInput) (*CreateJo
 	}
 
 	var result CreateJobResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := decodeProviderResponse(resp.Body, &result); err != nil {
 		return nil, fmt.Errorf("%w: decode create response", ErrProviderResponseInvalid)
 	}
 	if strings.TrimSpace(result.JobID) == "" {
@@ -173,7 +198,7 @@ func (c *Client) GetJobStatus(ctx context.Context, jobID string) (*JobStatusResu
 	}
 
 	var result JobStatusResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := decodeProviderResponse(resp.Body, &result); err != nil {
 		return nil, fmt.Errorf("%w: decode status response", ErrProviderResponseInvalid)
 	}
 	if strings.TrimSpace(result.JobID) == "" || strings.TrimSpace(result.Status) == "" {
@@ -204,7 +229,7 @@ func (c *Client) GetJobResult(ctx context.Context, jobID string) (*JobResult, er
 	}
 
 	var result JobResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := decodeProviderResponse(resp.Body, &result); err != nil {
 		return nil, fmt.Errorf("%w: decode result response", ErrProviderResponseInvalid)
 	}
 	if strings.TrimSpace(result.JobID) == "" {
@@ -223,4 +248,42 @@ func normalizePath(path string) string {
 		return trimmed
 	}
 	return "/" + trimmed
+}
+
+func decodeProviderResponse(body io.Reader, target any) error {
+	var raw map[string]any
+	if err := json.NewDecoder(body).Decode(&raw); err != nil {
+		return err
+	}
+
+	normalized := normalizeProviderValue(raw)
+	payload, err := json.Marshal(normalized)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(payload, target)
+}
+
+func normalizeProviderValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		normalized := make(map[string]any, len(typed))
+		for key, nested := range typed {
+			alias, ok := providerResponseAliases[key]
+			if ok {
+				key = alias
+			}
+			normalized[key] = normalizeProviderValue(nested)
+		}
+		return normalized
+	case []any:
+		normalized := make([]any, 0, len(typed))
+		for _, nested := range typed {
+			normalized = append(normalized, normalizeProviderValue(nested))
+		}
+		return normalized
+	default:
+		return value
+	}
 }

@@ -1,26 +1,26 @@
-# SkillJudge Phase 2 计划
+# SkillJudge 当前计划
 
-## 1. 当前目标
+## 1. 当前阶段
 
-当前阶段已进入 `Phase 2`。现阶段目标不是继续补齐 MVP 主链，而是在现有基础上完成核心功能收口，重点推进 AI 视频分析接入和人机评分对比能力。
+当前项目已完成 `Phase 2` 的大部分主链，现阶段后端重心不再是继续补 MVP，而是围绕教师交付、统计口径和报告能力做收口。
 
-当前主参考文档：
+主参考文档：
 
 - [`designingDocs/phase.md`](/Users/jason/go/src/SkillJudge/backend/designingDocs/phase.md)
 - [`designingDocs/api.md`](/Users/jason/go/src/SkillJudge/backend/designingDocs/api.md)
 - [`designingDocs/platform-schema-reference.md`](/Users/jason/go/src/SkillJudge/backend/designingDocs/platform-schema-reference.md)
 - [`designingDocs/auth.md`](/Users/jason/go/src/SkillJudge/backend/designingDocs/auth.md)
 
-当前数据库主线：
+当前数据库主链：
 
-- 业务主线：`schools -> projects -> tasks -> videos -> ai_evaluations / manual_evaluations`
-- 权限主线：`users -> user_roles -> roles -> role_permissions -> permissions`
+- 业务主链：`schools -> projects -> tasks -> videos -> ai_evaluations / manual_evaluations`
+- 权限主链：`users -> user_roles -> roles -> role_permissions -> permissions`
 
 ## 2. 当前基线
 
-当前代码仍是模块化单体，但业务主链已经基本成型。
+当前代码仍是模块化单体，但主业务链路已经成型。
 
-已完成模块：
+已完成能力：
 
 - `auth / user`
   - 登录、刷新、登出
@@ -57,20 +57,27 @@
   - 外部 AI 任务创建
   - 外部 AI 任务轮询
   - AI 结果落库与视频摘要回填
+  - 批量创建有限并发
+  - 轮询有限并发
 
-当前阶段判断：
+当前已完成的重要结构调整：
 
-- `任务分配` 后端能力已基本完成，当前主要是联调和体验收口
-- `学生查分` 后端主链已经落地，当前主要是前后端展示细节收口
-- `视频播放优化` 主要由前端承接，后端只需稳定提供 AI 返回的阶段点、关键时间点和错误点数据
-- 当前后端主开发重点应转为：
-  - AI 视频分析正式接入
-  - 人机评分对比结果收口
-  - AI 结果结构与前端展示对齐
+- RBAC 已切到正式权限链：`user_roles -> role_permissions -> permissions`
+- `task` 已成为正式业务中间层
+- `project` 已从 `rubric` 绑定职责中收缩
+- `video` 已迁到任务维度
+- 视频对象 key 已切到：
+  - `projects/{projectId}/tasks/{taskId}/videos/{videoId}/{filename}`
+- 评分当前按单评模式实现
+- AI 评估当前按“单视频单任务”实现
+- AI 对接协议已统一为：
+  - 创建任务
+  - 轮询状态
+  - 拉取结果
 
-## 3. 已完成主链
+## 3. 当前已落地主链
 
-当前已完成的主链是：
+人工评分主链：
 
 1. 登录
 2. 创建项目
@@ -82,11 +89,7 @@
 8. 查看评分详情
 9. 提交人工评分
 
-对应主链：
-
-`project -> task -> video -> assign scorer -> my tasks -> detail -> submit`
-
-当前已补充的 AI 评分链路：
+AI 评估主链：
 
 1. 教师或管理员触发 AI 评分
 2. 后端按 `video` 创建 `ai_evaluations`
@@ -95,352 +98,376 @@
 5. 后端回填 `ai_evaluations`、`videos.ai_status`、`videos.ai_score`
 6. 前端通过视频详情、评分详情或 AI 评估接口读取结果
 
-当前已补充的学生查分链路：
+学生查分主链：
 
 1. 上传视频时写入或从文件名兜底解析 `student_id`
 2. 学生登录后查询自己的视频列表
 3. 学生进入视频详情查看 AI / 人工评分结果
 4. 学生详情页消费 AI 返回的阶段点和关键时间点
 
-## 4. 当前已实现接口
+## 4. 当前主要缺口
 
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/refresh`
-- `POST /api/v1/auth/logout`
-- `GET /api/v1/users/me`
-- `PATCH /api/v1/users/me`
-- `POST /api/v1/users`
-- `GET /api/v1/users`
-- `PATCH /api/v1/users/:id`
-- `DELETE /api/v1/users/:id`
-- `POST /api/v1/projects`
-- `GET /api/v1/projects`
-- `GET /api/v1/projects/:id`
-- `PATCH /api/v1/projects/:id`
-- `DELETE /api/v1/projects/:id`
-- `POST /api/v1/rubrics`
-- `GET /api/v1/rubrics`
-- `GET /api/v1/rubrics/:id`
-- `PATCH /api/v1/rubrics/:id`
-- `DELETE /api/v1/rubrics/:id`
-- `POST /api/v1/rubrics/upload-template`
-- `POST /api/v1/projects/:projectId/tasks`
-- `GET /api/v1/projects/:projectId/tasks`
-- `GET /api/v1/tasks/:id`
+当前不是缺“有没有接口”，而是缺“状态口径是否统一”。最大问题集中在 `videos` 表三类状态的职责边界：
+
+- `manual_status`
+  - 人工评分子流程状态
+- `ai_status`
+  - AI 评估子流程状态
+- `evaluation_status`
+  - 视频整体任务完成状态
+
+旧实现中，`evaluation_status` 被部分当成“人工是否完成”，部分当成“整体是否完成”，导致：
+
+- 评分员视角和教师视角的完成态混用
+- `completed_at` 语义不稳定
+- 任务/项目聚合统计依赖的完成口径不稳定
+- 后续 `scoreboard`、报告、导出接口没有稳固的状态基础
+
+## 5. 视频状态最小改造方案
+
+本轮优先落地最小改造，不新增表，不改现有主接口路径，只统一状态语义和聚合规则。
+
+### 5.1 字段职责
+
+- `manual_status`
+  - 只表示人工评分进度
+  - `pending / in_progress / submitted`
+- `ai_status`
+  - 只表示 AI 评估进度
+  - `pending / processing / completed / failed`
+- `evaluation_status`
+  - 只表示视频整体流程状态
+  - `pending / in_progress / completed / failed`
+- `videos.completed_at`
+  - 只表示整条视频流程最终完成时间
+  - 即整体 `evaluation_status = completed` 的时间
+
+### 5.2 聚合规则
+
+整体视频完成规则：
+
+- `manual_status = submitted`
+- 且 `ai_status = completed`
+- 才能得到 `evaluation_status = completed`
+
+评分员自己的任务完成规则：
+
+- 只看 `manual_status`
+- `manual_status = submitted` 时，评分员任务视角应显示为 `completed`
+
+建议的组合规则：
+
+| `manual_status` | `ai_status` | `evaluation_status` | 评分员视角 |
+| --- | --- | --- | --- |
+| `pending` | `pending` | `pending` | `pending` |
+| `pending` | `processing` | `in_progress` | `pending` |
+| `pending` | `completed` | `in_progress` | `pending` |
+| `pending` | `failed` | `failed` | `pending` |
+| `in_progress` | `pending` | `in_progress` | `in_progress` |
+| `in_progress` | `processing` | `in_progress` | `in_progress` |
+| `in_progress` | `completed` | `in_progress` | `in_progress` |
+| `in_progress` | `failed` | `failed` | `in_progress` |
+| `submitted` | `pending` | `in_progress` | `completed` |
+| `submitted` | `processing` | `in_progress` | `completed` |
+| `submitted` | `completed` | `completed` | `completed` |
+| `submitted` | `failed` | `failed` | `completed` |
+
+### 5.3 最小改造范围
+
+1. 新增统一状态解析逻辑
+- 提供共享 helper
+- 统一计算：
+  - `evaluation_status`
+  - scorer task 视角的 `status`
+  - `completed_at`
+
+2. 修正人工评分提交链路
+- 提交人工评分后：
+  - 必须更新 `manual_status`
+  - 必须根据当前 `ai_status` 统一重算 `evaluation_status`
+  - 只有整体完成时才写 `videos.completed_at`
+
+3. 修正 AI 创建 / 轮询 / 完成 / 失败链路
+- AI 状态进入 `processing / completed / failed` 时：
+  - 必须根据当前 `manual_status` 重算 `evaluation_status`
+  - 只有整体完成时才写 `videos.completed_at`
+- AI 重跑进入 `processing` 时：
+  - 若视频原本整体完成，应回退为 `in_progress`
+  - `videos.completed_at` 需要清空
+
+4. 修正评分员接口的状态语义
 - `GET /api/v1/tasks/my`
-- `POST /api/v1/tasks/:id/assignments`
+- scorer 视角的 `GET /api/v1/tasks/:id`
 - `POST /api/v1/tasks/:id/submit`
-- `POST /api/v1/videos/upload-credential`
-- `POST /api/v1/videos/:id/confirm-upload`
-- `GET /api/v1/videos`
-- `GET /api/v1/videos/:id`
-- `DELETE /api/v1/videos/:id`
-- `GET /api/v1/students/me/videos`
-- `GET /api/v1/students/me/videos/:id`
-- `POST /api/v1/videos/:id/ai-evaluations`
-- `POST /api/v1/tasks/:id/ai-evaluations`
-- `GET /api/v1/ai-evaluations/:id`
-- `GET /api/v1/ai-evaluations/:id/result`
-- `GET /health`
-- `GET /ready`
+- 上述接口中的 `status` 字段应改为 scorer task 视角状态
+- 同时补充：
+  - `manualStatus`
+  - `aiStatus`
+  - `evaluationStatus`
 
-## 5. 已完成的重要调整
+5. 修正任务 / 项目聚合统计
+- 任务、项目的 `completedVideos` 继续看 `evaluation_status = completed`
+- 但前提是 `evaluation_status` 必须由统一规则维护
+- DTO 补充：
+  - `allVideosCompleted`
+  - `completionRate`
 
-- RBAC 已切到正式权限链：
-  - `user_roles -> role_permissions -> permissions`
-- `task` 已成为正式业务中间层
-- `project` 已从 `rubric` 绑定职责中收缩
-- `video` 已从项目维度迁到任务维度
-- `video` 相关接口已改为使用 `taskId`
-- 视频对象 key 已切到：
-  - `projects/{projectId}/tasks/{taskId}/videos/{videoId}/{filename}`
-- `scoring` 当前按单评模式实现
-- 评分任务视图当前落在 `video` 上，而不是单独新增复杂任务主表
-- AI 评估当前按“单视频单任务”实现：
-  - 一条 `ai_evaluations`
-  - 对应一个外部 `job_id`
-  - 批量触发仅作为业务层批处理入口，底层仍逐视频创建
-- AI 对接协议已统一为：
-  - 创建任务
-  - 轮询状态
-  - 拉取结果
+### 5.4 不在本轮范围
 
-## 6. 当前 Phase 2 范围
+- 不新增独立 scoring_task 主表
+- 不引入双评、多评、复评、仲裁
+- 不改 AI 外部协议
+- 不新增批量导出异步任务表
+- 不在本轮实现学生报告 / 邮件通知
 
-当前明确纳入 `Phase 2`：
+### 5.5 实施顺序
 
-- AI 视频分析集成
-  - 外部 AI 创建任务
-  - 外部 AI 状态轮询
-  - 外部 AI 结果拉取
-  - AI 结果落库与摘要回填
-- 人机评分对比
-  - 视频详情中的 AI / manual 对比
-  - 评分详情中的 AI / manual 对比
-  - 前端展示字段对齐
-- 任务分配收口
-  - 当前后端能力已基本完成
-  - 剩余工作以联调和边界修正为主
-- 视频播放优化的后端配合
-  - 稳定返回 `videoStages`
-  - 稳定返回 `videoPoints`
-  - 稳定返回时间戳相关字段
-  - 不承担播放器交互本身实现
+1. 整理 `plans.md`，确认统一口径
+2. 新增共享状态聚合 helper
+3. 改人工评分提交链路
+4. 改 AI 创建、轮询、完成、失败链路
+5. 改评分员列表 / 详情 / 提交返回
+6. 改任务 / 项目 DTO 统计字段
+7. 运行 `go test ./...` 回归验证
 
-当前明确不纳入当前后端主开发范围：
+### 5.6 验收标准
 
-- `task` 更新/删除
-- 视频批量上传
-- 视频转码
-- 双评、多评、复评、仲裁
-- 通知与统计深化
-- 视频播放器 UI / 时间轴交互实现
-- AI 评分的深度工程化增强：
-  - 阶段性交付消费
-  - 更细粒度进度展示
-  - 完整调度异步化
-  - 多实例任务认领
-  - 更复杂的失败重试与补偿
-- 数据统计基础功能
+- 评分员提交后，评分员视角任务立即为 `completed`
+- AI 未完成时，视频整体 `evaluation_status` 仍为 `in_progress`
+- AI 和人工都完成后，视频整体 `evaluation_status = completed`
+- AI 重跑时，整体状态可从 `completed` 回退到 `in_progress`
+- `videos.completed_at` 只在整体完成时写入
+- 任务 / 项目 `completedVideos` 与整体完成态保持一致
+- 项目 / 任务返回 `allVideosCompleted`、`completionRate`
 
-## 7. 当前遗留事项
+## 6. 本轮新增实施范围
 
-当前最主要的遗留不是主链缺失，而是 `Phase 2` 核心能力的联调、收口和有限优化：
+在完成状态口径统一后，本轮继续落地教师端最直接依赖的两块能力：
 
-1. AI 视频分析联调
-- 登录
-- 创建项目
-- 创建批次
-- 创建/上传评分细则
-- 上传视频
-- 分配评分员
-- 评分员查看任务
-- 查看评分详情
-- 提交评分
-- 单视频触发 AI 评分
-- 任务批量触发 AI 评分
-- AI 状态查询
-- AI 结果查询
+1. `Task` 级完成状态提示
+2. 任务成绩汇总页与前端 Excel 导出
 
-2. 人机评分对比收口
-- 对齐视频详情中的 `aiEvaluation`
-- 对齐评分详情中的 `aiEvaluation`
-- 对齐 AI 总分、分项明细、错误点、阶段点
-- 对齐 AI 失败态、空结果、重跑后的最新结果展示
+### 6.1 Task 级完成状态提示
 
-3. 视频播放优化的后端配合
-- 确保 AI 返回的 `videoStages` 字段稳定
-- 确保 AI 返回的 `videoPoints` 字段稳定
-- 确保时间字段和秒级字段可直接供前端做时间轴标记和跳转
-- 当前阶段不扩展播放器专用后端接口
+目标：
 
-4. 测试材料补齐
-- `curl` / Postman 风格联调文档
-- 关键失败场景说明
-- AI 轮询链路联调样例
-- AI 状态枚举和错误码对齐
+- 只做 `task` 级完成统计，不做 `project` 级完成提示聚合。
+- 教师端任务列表每一行前增加状态按钮或勾选图标。
+- 若任务下全部视频都完成评测，则高亮；否则灰色。
 
-5. AI 评分当前实施计划
-- 第 1 步：外部 AI 联调收口
-  - 按 `designingDocs/external_api_current_implementation.md` 对齐创建、状态、结果 3 个接口
-  - 确认 `job_id` 已写入数据库并贯通查询链路
-- 第 2 步：有限并发优化
-  - 将任务批量触发从串行改为有限并发
-  - 将后台轮询从串行改为有限并发
-  - 控制 AI 侧请求并发上限，避免形成阻塞点
-- 第 3 步：结果与展示收口
-  - 对齐视频详情、评分详情中的 `aiEvaluation`
-  - 对齐 AI 失败态和空结果场景
-  - 对齐重跑语义和前端提示
-- 第 4 步：后续增强预留
-  - 保留 `result_slices` 扩展口，但当前阶段不消费
-  - 后续按需要评估完整异步派发、进度字段、多实例认领
+单视频完成口径：
 
-6. 联调后问题收口
-- 参数对齐问题
+- `manual_status = submitted`
+- 且 `ai_status = completed`
 
-## 8. 模型侧最小改造计划
+任务聚合字段：
 
-当前阶段仅改模型侧 Python 服务 `ai_eval_mock`，业务侧 Go 接口保持不变。
+- `totalVideos`
+  - 当前任务下的视频总数。
+- `completedVideos`
+  - 当前任务下已经完成完整评测流程的视频数量。
+- `allVideosCompleted`
+  - 当前任务下是否全部视频都已完成评测。
+- `completionRate`
+  - 当前任务完成率，计算口径为 `completedVideos / totalVideos * 100`。
 
-### 8.1 目标
+接口策略：
 
-- 继续使用 `POST /api/v1/analysis-jobs`
-- 继续由业务侧传入 `video.type=url`
-- 模型侧负责下载视频、处理任务、生成结果
-- 模型侧将任务状态和结果写入 Redis
-- 模型侧将视觉模型并发限制为 `2`
-- 视频在成功产出报告后保留 `5` 分钟
-- 结果在模型侧保留 `24` 小时，供业务侧补拉
+- 不新增接口。
+- 直接复用：
+  - `GET /api/v1/projects/:projectId/tasks`
+  - `GET /api/v1/tasks/:taskId`
+- 上述字段由后端聚合后稳定返回给前端，不由前端自行遍历视频计算。
 
-### 8.2 当前选择的方案
+前端实施点：
 
-采用折中方案：
+- 教师端任务列表消费任务聚合字段。
+- 使用 `allVideosCompleted` 控制图标高亮状态。
+- 使用 `completedVideos / totalVideos` 与 `completionRate` 展示进度。
 
-- `Redis job store + asyncio.Queue + worker pool`
+### 6.2 任务成绩汇总页与前端 Excel 导出
 
-职责拆分：
+目标：
 
-- `JobStore`
-  - 负责 job 状态、结果、TTL、恢复信息
-- `Dispatcher`
-  - 当前使用进程内 `asyncio.Queue`
-- `WorkerPool`
-  - 当前固定 `2` 个 worker
-- `Runner`
-  - 负责下载、预处理、模型调用、结果归一
-- `VideoCache`
-  - 负责本地临时文件与过期清理
+- 教师在任务列表行末点击“查看成绩”后，进入任务成绩页或弹窗。
+- 页面展示该任务下全部学生的最新成绩与完成状态。
+- 支持“已完成显示成绩，未完成显示未完成”。
+- 导出由前端基于当前查询结果直接合成 Excel，不新增后端异步导出任务。
 
-### 8.3 本次实施范围
+接口设计：
 
-1. 将 `job_store.py` 从内存字典改为 Redis 实现
-2. 新增进程内队列和固定 worker 池
-3. 接入本地视频缓存目录
-4. 成功产出报告后记录视频过期时间，TTL 为 5 分钟
-5. Redis 中的 job 与 result TTL 为 24 小时
-6. 服务启动时恢复 `queued / processing` 的未完成任务
-7. 为后续升级到 Redis 队列预留 `Dispatcher` 抽象边界
+- 新增 `GET /api/v1/tasks/:taskId/scoreboard`
 
-### 8.4 暂不纳入本次范围
+语义：
 
-- 业务侧 Go 接口改动
-- 多实例任务认领
-- Redis 原生分布式队列
-- 更复杂的失败重试与死信队列
-- 真正的视觉模型多模态协议细节
+- 返回某个任务下全部学生的视频评测成绩汇总。
+- 用于成绩页展示。
+- 也作为前端导出 Excel 的数据源。
+- 必须支持部分学生已完成、部分学生未完成的混合结果。
 
-### 8.5 升级路径
+query 参数：
 
-本次实现完成后，后续从方案 2 升级到方案 3 时，预期只需要：
+- `page`
+- `pageSize`
+- `keyword`
+  - 按学生姓名、学号模糊搜索
+- `scope`
+  - `page` / `all`
+  - 页面展示默认使用 `page`
+  - 前端导出时使用 `all` 拉取当前筛选条件下的全量结果
+- `evaluationStatus`
+  - `completed` / `in_progress` / `failed`
+- `sortBy`
+  - `studentNumber` / `studentName` / `aiScore` / `manualScore` / `completedAt`
+- `sortOrder`
+  - `asc` / `desc`
 
-- 保留 `Redis JobStore`
-- 将 `InMemoryDispatcher` 替换为 `RedisDispatcher`
-- 调整 worker 从 Redis 队列取任务
+返回字段基线：
 
-不应重写：
+- `task`
+  - `id`
+  - `name`
+  - `status`
+  - `totalVideos`
+  - `completedVideos`
+  - `allVideosCompleted`
+  - `completionRate`
+- `summary`
+  - `totalStudents`
+  - `completedStudents`
+  - `averageAIScore`
+  - `averageManualScore`
+- `items[]`
+  - `videoId`
+  - `studentName`
+  - `studentNumber`
+  - `aiScore`
+  - `manualScore`
+  - `aiStatus`
+  - `manualStatus`
+  - `evaluationStatus`
+  - `completedAt`
+  - `displayStatus`
+- `pagination`
 
-- HTTP 接口
-- Job 状态结构
-- 结果结构
-- 视频缓存逻辑
-- Runner 主流程
-- 数据初始化问题
-- 权限边界问题
-- 上传和评分状态问题
-- AI 创建、轮询、结果映射问题
+展示规则：
 
-## 8. 有限并发实施方案
+- `evaluationStatus = completed`
+  - 前端显示成绩。
+- `evaluationStatus != completed`
+  - 前端主文案先统一显示“未完成”。
+- 后端仍返回 `aiStatus` / `manualStatus`，为后续更细粒度提示预留。
 
-本阶段的有限并发优化只解决当前 AI 链路中的两个串行瓶颈，不改数据库结构，不改前端接口契约，不引入完整异步调度重构。
+职责划分：
 
-### 8.1 优化目标
+- 后端负责返回实时成绩与状态。
+- 前端负责基于当前查询结果直接导出 Excel。
+- 若后续单个任务学生规模显著增大，再补后端异步导出接口。
 
-- 保持现有 AI 评估业务模型不变：
-  - 一个 `video`
-  - 对应一条 `ai_evaluations`
-  - 对应一个外部 `job_id`
-- 保持前端接口不变：
-  - `POST /api/v1/videos/:id/ai-evaluations`
-  - `POST /api/v1/tasks/:id/ai-evaluations`
-  - `GET /api/v1/ai-evaluations/:id`
-  - `GET /api/v1/ai-evaluations/:id/result`
-- 仅优化后端内部执行方式：
-  - 批量创建从串行改为有限并发
-  - 后台轮询从串行改为有限并发
+### 6.3 任务成绩分析页与任务分析报告
 
-### 8.2 当前瓶颈
+目标：
 
-- `BatchCreateForTask` 当前逐个视频顺序调用 AI 创建逻辑，批量触发时响应时间会线性增长
-- `pollOnce` 当前逐条任务顺序轮询 AI 状态和结果，单条慢任务会拖住整轮
+- 分析页面和分析报告都属于 `task` 级最终交付能力。
+- 两者都只在任务全部完成后开放，不参与过程追踪。
+- 当前阶段暂不纳入批量学生报告。
 
-### 8.3 具体改造点
+开放条件：
 
-1. 批量创建有限并发
-- 改造位置：
-  - `internal/modules/ai/service.go`
-- 改造方法：
-  - 保留现有 `BatchCreateForTask` 入口和返回结构
-  - 仍然先完成任务权限校验和视频集合查询
-  - 将原来的串行 `for` 循环改成有限并发 worker 模式
-  - 每个视频继续复用现有 `createForResolvedVideo(...)`
-- 并发控制：
-  - 使用固定并发上限
-  - 使用 `WaitGroup + semaphore + Mutex` 汇总结果
-- 返回语义保持不变：
-  - `total`
+- `allVideosCompleted = true`
+
+接口设计：
+
+- `GET /api/v1/tasks/:taskId/analysis`
+  - 返回任务最终分析页面所需数据
+  - 仅当任务全部完成后允许访问
+- `POST /api/v1/tasks/:taskId/analysis-report`
+  - 异步受理当前任务最终分析报告生成请求
+  - 不同步等待 PDF 完成
+  - 当前阶段不支持显式重生成
+- `GET /api/v1/tasks/:taskId/analysis-report`
+  - 查询当前任务当前有效分析报告状态与访问地址
+
+分析页面指标基线：
+
+- `task`
+  - `id`
+  - `name`
+  - `rubricTotalScore`
+  - `totalVideos`
+  - `completedVideos`
+  - `allVideosCompleted`
+- `scoreSummary`
+  - `averageAIScore`
+  - `averageManualScore`
+  - `highestAIScore`
+  - `lowestAIScore`
+  - `highestManualScore`
+  - `lowestManualScore`
+- `manualScoreDistribution`
+- `aiScoreDistribution`
+- `scoreGapDistribution`
+
+图表口径：
+
+- 分布图按任务满分归一化后分桶，避免不同任务因满分不同导致图表不可比较
+- 页面主分数仍保留原始分值展示，不默认转换为百分制
+
+任务分析报告数据落地：
+
+- 使用独立表 `task_analysis_reports`
+- 当前数据库层面不对 `task_id` 做唯一约束
+- 状态枚举收敛为：
+  - `queued`
   - `processing`
+  - `ready`
   - `failed`
-  - `errors`
+- 业务层承担：
+  - 幂等控制
+  - 并发控制
+  - 当前有效报告选择规则
 
-2. 轮询有限并发
-- 改造位置：
-  - `internal/modules/ai/service.go`
-- 改造方法：
-  - 保留现有 `RunPoller` 定时轮询结构
-  - 保留数据库候选任务查询方式
-  - 将 `pollOnce` 中逐条顺序处理改为有限并发处理
-  - 每条任务继续复用现有 `pollEvaluation(...)`
-- 并发控制：
-  - 每轮最多同时处理固定数量的 polling 任务
-  - 单条任务失败不影响其他任务继续执行
-  - 单条任务增加独立超时控制，避免慢请求长期占用 worker
+异步生成策略：
 
-3. 配置化并发上限
-- 改造位置：
-  - `internal/config/config.go`
-  - `.env.example`
-- 新增配置项：
-  - `AI_CREATE_CONCURRENCY`
-  - `AI_POLL_CONCURRENCY`
-- 默认建议值：
-  - `AI_CREATE_CONCURRENCY=5`
-  - `AI_POLL_CONCURRENCY=5`
+- `POST /analysis-report` 只负责：
+  - 校验任务是否已全部完成
+  - 创建或复用 `queued` / `processing` / `ready` 记录
+  - 立即返回受理结果
+- 后端后台 worker 负责：
+  - 扫描或消费 `queued` 报告
+  - 抢占后更新为 `processing`
+  - 聚合分析数据
+  - 渲染 HTML
+  - 调用 Chrome/Chromium 转 PDF
+  - 上传 OSS
+  - 更新为 `ready` 或 `failed`
+- 前端负责：
+  - 触发 `POST`
+  - 轮询 `GET /analysis-report`
+  - 根据 `queued / processing / ready / failed` 展示提示
 
-### 8.4 不在本次实施范围
+### 6.4 本轮实施顺序
 
-- 不修改数据库字段
-- 不修改 `ai_evaluations` 状态机
-- 不引入新的调度状态，如 `pending`、`dispatching`
-- 不将创建任务彻底后台化
-- 不实现多实例任务认领
-- 不消费 `result_slices`
-- 不修改前端接口请求体和响应体
+1. 收敛 `plans.md` 与接口草案口径
+2. 实现 `GET /api/v1/tasks/:taskId/scoreboard`
+3. 校验任务聚合字段在教师端任务接口中稳定返回
+4. 教师端任务列表增加完成状态按钮和“查看成绩”入口
+5. 教师端成绩页/弹窗接入 `scoreboard`
+6. 前端基于 `scoreboard?scope=all` 结果实现 Excel 导出
+7. 实现 `GET /api/v1/tasks/:taskId/analysis`
+8. 将 `POST /api/v1/tasks/:taskId/analysis-report` 改为异步受理
+9. 增加任务分析报告后台 worker
+10. 实现 `GET /api/v1/tasks/:taskId/analysis-report`
+11. 运行后端测试与前端最小联调验证
 
-### 8.5 预期代码变更范围
+## 7. 当前结论
 
-- `backend/internal/modules/ai/service.go`
-  - 批量创建并发化
-  - 轮询并发化
-  - 单条 polling 超时控制
-- `backend/internal/config/config.go`
-  - 增加 AI 创建并发和轮询并发配置
-- `backend/.env.example`
-  - 增加并发配置示例
+当前项目可以从“统一完成态”继续推进到“教师端交付最小闭环”。本轮优先落地：
 
-### 8.6 实施顺序
+- `task` 级完成状态提示
+- 任务成绩汇总查询
+- 前端实时导出成绩单
+- 任务最终分析页面
+- 任务分析报告后端生成与存储
 
-1. 增加并发配置项
-2. 改造 `BatchCreateForTask` 为有限并发
-3. 改造 `pollOnce` 为有限并发
-4. 补充日志和错误收口
-5. 运行 `go test ./...` 做回归验证
-
-### 8.7 验收标准
-
-- 批量触发接口仍保持原有返回结构
-- 批量触发时多个视频可以并行创建 AI 任务
-- 后台轮询时多个 `processing` 任务可以并行轮询
-- 单条任务失败不阻塞其他任务
-- 现有 AI 查询接口行为不变
-- 编译与测试通过
-
-## 9. 当前结论
-
-当前项目已进入 `Phase 2`，`Phase 1` 主链已基本完成。后续工作重心应转为：
-
-1. AI 视频分析正式接入
-2. 人机评分对比收口
-3. AI 轮询链路收口
-4. 有限并发优化
-5. 问题收口
+学生报告与批量学生报告继续放在下一轮。
