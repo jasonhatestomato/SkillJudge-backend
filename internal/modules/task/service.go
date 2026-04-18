@@ -136,9 +136,20 @@ func (s *Service) List(ctx context.Context, actor user.UserContext, params ListP
 		return nil, err
 	}
 
+	taskIDs := make([]uuid.UUID, 0, len(items))
+	for i := range items {
+		taskIDs = append(taskIDs, items[i].ID)
+	}
+	manualCompletedMap, err := s.repo.CountManualSubmittedByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	result := make([]TaskDTO, 0, len(items))
 	for i := range items {
-		result = append(result, *ToTaskDTO(&items[i]))
+		dto := ToTaskDTO(&items[i])
+		applyManualProgress(dto, items[i].TotalVideos, int(manualCompletedMap[items[i].ID]))
+		result = append(result, *dto)
 	}
 
 	return &ListTasksResult{
@@ -158,7 +169,14 @@ func (s *Service) GetByID(ctx context.Context, actor user.UserContext, taskID uu
 		return nil, err
 	}
 
-	return ToTaskDTO(resolved.Item), nil
+	dto := ToTaskDTO(resolved.Item)
+	manualCompletedMap, err := s.repo.CountManualSubmittedByTaskIDs(ctx, []uuid.UUID{resolved.Item.ID})
+	if err != nil {
+		return nil, err
+	}
+	applyManualProgress(dto, resolved.Item.TotalVideos, int(manualCompletedMap[resolved.Item.ID]))
+
+	return dto, nil
 }
 
 func (s *Service) GetScoreboard(ctx context.Context, actor user.UserContext, params ScoreboardParams) (*ScoreboardResult, error) {

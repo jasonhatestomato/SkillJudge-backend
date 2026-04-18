@@ -607,7 +607,8 @@ func decodeStoredResult(raw map[string]any) (*storedResult, error) {
 	if len(raw) == 0 {
 		return &storedResult{}, nil
 	}
-	payload, err := json.Marshal(raw)
+	normalized := normalizeProviderValue(raw)
+	payload, err := json.Marshal(normalized)
 	if err != nil {
 		return nil, err
 	}

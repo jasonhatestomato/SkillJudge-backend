@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ .TaskName }} 学生个人评分报告</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #eef3f8;
+            --card: #ffffff;
+            --ink: #1f2937;
+            --muted: #6b7280;
+            --line: #dbe4ee;
+            --brand: #0f4c81;
+            --brand-soft: #e8f1fa;
+            --accent: #d97706;
+            --danger: #c2410c;
+            --success: #166534;
+            --shadow: 0 16px 40px rgba(15, 76, 129, 0.10);
+        }
+
+        body {
+            font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+            color: var(--ink);
+            background: linear-gradient(180deg, #eef3f8 0%, #f7fafc 100%);
+            padding: 24px;
+            line-height: 1.6;
+        }
+
+        .report {
+            max-width: 1120px;
+            margin: 0 auto;
+            background: var(--card);
+            border-radius: 24px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+        }
+
+        .hero {
+            padding: 40px 44px 36px;
+            background:
+                radial-gradient(circle at top right, rgba(255, 255, 255, 0.18), transparent 35%),
+                linear-gradient(135deg, #123d6d 0%, #0f4c81 55%, #1d6aa5 100%);
+            color: #ffffff;
+        }
+
+        .hero-top {
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+            align-items: flex-start;
+        }
+
+        .hero h1 {
+            font-size: 34px;
+            line-height: 1.2;
+            margin-bottom: 10px;
+            letter-spacing: 0.5px;
+        }
+
+        .hero-subtitle {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+
+        .score-panel {
+            min-width: 220px;
+            background: rgba(255, 255, 255, 0.14);
+            border: 1px solid rgba(255, 255, 255, 0.20);
+            border-radius: 20px;
+            padding: 20px 24px;
+            text-align: center;
+            backdrop-filter: blur(8px);
+        }
+
+        .score-label {
+            font-size: 14px;
+            opacity: 0.88;
+            margin-bottom: 8px;
+        }
+
+        .score-main {
+            font-size: 52px;
+            line-height: 1;
+            font-weight: 700;
+        }
+
+        .score-rate {
+            margin-top: 10px;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .meta-grid {
+            margin-top: 26px;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 14px;
+        }
+
+        .meta-item {
+            background: rgba(255, 255, 255, 0.10);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 16px;
+            padding: 14px 16px;
+        }
+
+        .meta-label {
+            font-size: 12px;
+            opacity: 0.78;
+            margin-bottom: 4px;
+        }
+
+        .meta-value {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .section {
+            padding: 32px 44px;
+            border-top: 1px solid var(--line);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-end;
+            margin-bottom: 20px;
+        }
+
+        .section h2 {
+            font-size: 24px;
+            color: var(--brand);
+            letter-spacing: 0.3px;
+        }
+
+        .section-note {
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .summary-card {
+            background: #f8fbfe;
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            padding: 24px 26px;
+        }
+
+        .summary-text {
+            font-size: 15px;
+            color: #334155;
+            white-space: pre-wrap;
+        }
+
+        .detail-group {
+            margin-top: 22px;
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            overflow: hidden;
+            background: #ffffff;
+        }
+
+        .detail-group-header {
+            padding: 14px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            background: linear-gradient(180deg, #f8fbfe 0%, #eef5fb 100%);
+            border-bottom: 1px solid var(--line);
+        }
+
+        .detail-group-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #123d6d;
+        }
+
+        .detail-group-score {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--brand);
+            white-space: nowrap;
+        }
+
+        .detail-items {
+            padding: 14px 18px 4px;
+        }
+
+        .detail-item {
+            margin-bottom: 12px;
+            padding: 14px;
+            border: 1px solid #e7eef6;
+            border-radius: 14px;
+            background: #fbfdff;
+        }
+
+        .detail-item-top {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .detail-item-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+
+        .detail-item-subline {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .score-badge,
+        .time-badge,
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 26px;
+            border-radius: 999px;
+            padding: 3px 10px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .score-badge {
+            color: var(--brand);
+            background: var(--brand-soft);
+        }
+
+        .time-badge {
+            color: #92400e;
+            background: #fff7ed;
+        }
+
+        .status-badge {
+            color: var(--success);
+            background: #ecfdf3;
+        }
+
+        .detail-feedback {
+            margin-top: 6px;
+            font-size: 14px;
+            color: #334155;
+            white-space: pre-wrap;
+        }
+
+        .detail-meta {
+            display: grid;
+            grid-template-columns: 240px minmax(0, 1fr);
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .info-card {
+            border: 1px dashed #c9d7e6;
+            border-radius: 12px;
+            padding: 10px 12px;
+            background: #ffffff;
+        }
+
+        .info-title {
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .time-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .time-chip {
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: #f1f5f9;
+            color: #334155;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .screenshot-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 10px;
+        }
+
+        .screenshot-frame {
+            position: relative;
+            min-height: 112px;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #f3f6fa;
+            border: 1px solid #d7e1eb;
+        }
+
+        .screenshot-frame img {
+            display: block;
+            width: 100%;
+            height: 112px;
+            object-fit: cover;
+            background: #f3f6fa;
+        }
+
+        .screenshot-empty {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 10px;
+            color: #94a3b8;
+            font-size: 12px;
+            background:
+                linear-gradient(135deg, rgba(219, 228, 238, 0.5), rgba(255, 255, 255, 0.9));
+        }
+
+        .item-score-inline {
+            flex-shrink: 0;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--brand);
+            background: #edf4fb;
+            border: 1px solid #d4e3f2;
+            border-radius: 999px;
+            padding: 5px 10px;
+            white-space: nowrap;
+        }
+
+        .screenshot-frame.has-image .screenshot-empty {
+            display: none;
+        }
+
+        .footer {
+            padding: 22px 44px 30px;
+            border-top: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 13px;
+            background: #f8fbfe;
+        }
+
+        @media print {
+            body {
+                padding: 0;
+                background: #ffffff;
+            }
+
+            .report {
+                max-width: none;
+                border-radius: 0;
+                box-shadow: none;
+            }
+
+            .hero,
+            .detail-group-header {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+
+            .detail-group,
+            .detail-item,
+            .summary-card {
+                page-break-inside: avoid;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .detail-meta {
+                grid-template-columns: 1fr;
+            }
+
+            .detail-item-top {
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!--
+        建议渲染数据结构（Go html/template / map 均可）：
+
+        {
+          "TaskName": "发动机装配操作",
+          "StudentName": "张三",
+          "StudentNumber": "20260001",
+          "EvaluationTime": "2026-04-17 15:30:00",
+          "TotalScore": "42",
+          "MaxScore": "50",
+          "ScoreRate": "84.0%",
+          "OverallDescription": "整体评语",
+          "Details": [
+            {
+              "Title": "一、作业准备",
+              "AIScore": "2",
+              "FullScore": "10",
+              "Items": [
+                {
+                  "Subtitle": "设备锁止",
+                  "AIScore": "0",
+                  "FullScore": "2",
+                  "Feedback": "视频中未见锁止工具车和台架的动作。",
+                  "Status": "incorrect",
+                  "Evidence": {
+                    "Times": ["00:00:08", "00:00:12"],
+                    "Screenshots": ["https://..."]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+
+        评分详情字段映射要求：
+        - 评分项名称：Subtitle
+        - AI 评语：Feedback
+        - 时间点：Evidence.Times
+        - 图像：Evidence.Screenshots
+        - 分数：AIScore / FullScore
+
+        如果 Screenshots URL 不可访问，onerror 会隐藏图片并显示空白占位。
+    -->
+
+    <div class="report">
+        <section class="hero">
+            <div class="hero-top">
+                <div>
+                    <h1>学生个人评分报告</h1>
+                    <div class="hero-subtitle">{{ .TaskName }}</div>
+                </div>
+                <div class="score-panel">
+                    <div class="score-label">总分</div>
+                    <div class="score-main">{{ .TotalScore }}/{{ .MaxScore }}</div>
+                    <div class="score-rate">得分率：{{ .ScoreRate }}</div>
+                </div>
+            </div>
+
+            <div class="meta-grid">
+                <div class="meta-item">
+                    <div class="meta-label">学生姓名</div>
+                    <div class="meta-value">{{ .StudentName }}</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">学号</div>
+                    <div class="meta-value">{{ .StudentNumber }}</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">任务名称</div>
+                    <div class="meta-value">{{ .TaskName }}</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">评估时间</div>
+                    <div class="meta-value">{{ .EvaluationTime }}</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-header">
+                <h2>AI 总评</h2>
+                <div class="section-note">基于当前 AI 评分结构生成</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-text">{{ .OverallDescription }}</div>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-header">
+                <h2>评分详情</h2>
+                <div class="section-note">每个评分小项必须包含分数、时间点、AI 评语和图像证据</div>
+            </div>
+
+            {{ range .Details }}
+            <article class="detail-group">
+                <header class="detail-group-header">
+                    <div class="detail-group-title">{{ .Title }}</div>
+                    <div class="detail-group-score">
+                        {{ if .AIScore }}{{ .AIScore }}{{ else }}-{{ end }}/{{ if .FullScore }}{{ .FullScore }}{{ else }}-{{ end }}
+                    </div>
+                </header>
+
+                <div class="detail-items">
+                    {{ range .Items }}
+                    <section class="detail-item">
+                        <div class="detail-item-top">
+                            <div>
+                                <div class="detail-item-title">{{ .Subtitle }}</div>
+                                <div class="detail-item-subline">
+                                    <span class="score-badge">
+                                        得分：{{ if .AIScore }}{{ .AIScore }}{{ else }}-{{ end }}/{{ if .FullScore }}{{ .FullScore }}{{ else }}-{{ end }}
+                                    </span>
+                                    {{ if .Status }}
+                                    <span class="status-badge">{{ .Status }}</span>
+                                    {{ end }}
+                                </div>
+                            </div>
+                            <div class="item-score-inline">
+                                {{ if .AIScore }}{{ .AIScore }}{{ else }}-{{ end }}/{{ if .FullScore }}{{ .FullScore }}{{ else }}-{{ end }}
+                            </div>
+                        </div>
+
+                        <div class="detail-feedback">
+                            {{ if .Feedback }}{{ .Feedback }}{{ else }}未提供 AI 评语。{{ end }}
+                        </div>
+
+                        <div class="detail-meta">
+                            <div class="info-card">
+                                <div class="info-title">时间点</div>
+                                <div class="time-list">
+                                    {{ if .Evidence.Times }}
+                                        {{ range .Evidence.Times }}
+                                        <span class="time-chip">{{ . }}</span>
+                                        {{ end }}
+                                    {{ else }}
+                                        <span class="time-chip">未提供时间点</span>
+                                    {{ end }}
+                                </div>
+                            </div>
+
+                            <div class="info-card">
+                                <div class="info-title">图像证据</div>
+                                <div class="screenshot-grid">
+                                    {{ if .Evidence.Screenshots }}
+                                        {{ range .Evidence.Screenshots }}
+                                        <div class="screenshot-frame">
+                                            <img
+                                                src="{{ . }}"
+                                                alt="图像证据"
+                                                loading="lazy"
+                                                onload="this.parentElement.classList.add('has-image')"
+                                                onerror="this.style.display='none'; this.parentElement.classList.remove('has-image');"
+                                            >
+                                            <div class="screenshot-empty">图像不可访问或未提供有效截图</div>
+                                        </div>
+                                        {{ end }}
+                                    {{ else }}
+                                        <div class="screenshot-frame">
+                                            <div class="screenshot-empty">未提供图像证据</div>
+                                        </div>
+                                    {{ end }}
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                    {{ end }}
+                </div>
+            </article>
+            {{ end }}
+        </section>
+
+        <footer class="footer">
+            当前模板已按现有评分结果结构收口：评分详情使用 `subtitle`、`feedback`、`evidence.times`、`evidence.screenshots`、`ai_score`、`full_score` 对应渲染。
+        </footer>
+    </div>
+</body>
+</html>

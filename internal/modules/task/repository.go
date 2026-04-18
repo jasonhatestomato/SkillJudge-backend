@@ -445,3 +445,33 @@ func countProjectVideoStats(db *gorm.DB, projectID uuid.UUID) (int64, int64, err
 
 	return total, completed, nil
 }
+
+func (r *Repository) CountManualSubmittedByTaskIDs(ctx context.Context, taskIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	result := make(map[uuid.UUID]int64, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return result, nil
+	}
+
+	type row struct {
+		TaskID uuid.UUID
+		Count  int64
+	}
+
+	var rows []row
+	if err := r.db.WithContext(ctx).
+		Model(&model.Video{}).
+		Select("task_id, COUNT(*) AS count").
+		Where("task_id IN ?", taskIDs).
+		Where("status = ?", "ready").
+		Where("manual_status = ?", "submitted").
+		Group("task_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	for _, item := range rows {
+		result[item.TaskID] = item.Count
+	}
+
+	return result, nil
+}

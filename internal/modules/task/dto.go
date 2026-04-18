@@ -10,24 +10,27 @@ import (
 )
 
 type TaskDTO struct {
-	ID                 uuid.UUID       `json:"id"`
-	Name               string          `json:"name"`
-	Description        *string         `json:"description,omitempty"`
-	Status             string          `json:"status"`
-	StartDate          *time.Time      `json:"startDate,omitempty"`
-	Deadline           *time.Time      `json:"deadline,omitempty"`
-	EndDate            *time.Time      `json:"endDate,omitempty"`
-	TotalVideos        int             `json:"totalVideos"`
-	CompletedVideos    int             `json:"completedVideos"`
-	AllVideosCompleted bool            `json:"allVideosCompleted"`
-	CompletionRate     float64         `json:"completionRate"`
-	Project            *TaskProjectDTO `json:"project,omitempty"`
-	Rubric             *TaskRubricDTO  `json:"rubric,omitempty"`
-	Creator            *TaskCreatorDTO `json:"creator,omitempty"`
-	CreatedAt          time.Time       `json:"createdAt"`
-	UpdatedAt          time.Time       `json:"updatedAt"`
-	Metadata           map[string]any  `json:"metadata,omitempty"`
-	School             *user.SchoolDTO `json:"school,omitempty"`
+	ID                       uuid.UUID       `json:"id"`
+	Name                     string          `json:"name"`
+	Description              *string         `json:"description,omitempty"`
+	Status                   string          `json:"status"`
+	StartDate                *time.Time      `json:"startDate,omitempty"`
+	Deadline                 *time.Time      `json:"deadline,omitempty"`
+	EndDate                  *time.Time      `json:"endDate,omitempty"`
+	TotalVideos              int             `json:"totalVideos"`
+	CompletedVideos          int             `json:"completedVideos"`
+	AllVideosCompleted       bool            `json:"allVideosCompleted"`
+	CompletionRate           float64         `json:"completionRate"`
+	ManualCompletedVideos    int             `json:"manualCompletedVideos"`
+	AllManualVideosCompleted bool            `json:"allManualVideosCompleted"`
+	ManualCompletionRate     float64         `json:"manualCompletionRate"`
+	Project                  *TaskProjectDTO `json:"project,omitempty"`
+	Rubric                   *TaskRubricDTO  `json:"rubric,omitempty"`
+	Creator                  *TaskCreatorDTO `json:"creator,omitempty"`
+	CreatedAt                time.Time       `json:"createdAt"`
+	UpdatedAt                time.Time       `json:"updatedAt"`
+	Metadata                 map[string]any  `json:"metadata,omitempty"`
+	School                   *user.SchoolDTO `json:"school,omitempty"`
 }
 
 type TaskProjectDTO struct {
@@ -206,6 +209,15 @@ func ToTaskDTO(item *model.Task) *TaskDTO {
 	}
 
 	return dto
+}
+
+func applyManualProgress(dto *TaskDTO, totalVideos int, manualCompletedVideos int) {
+	if dto == nil {
+		return
+	}
+	dto.ManualCompletedVideos = manualCompletedVideos
+	dto.AllManualVideosCompleted = totalVideos > 0 && totalVideos == manualCompletedVideos
+	dto.ManualCompletionRate = completionRate(totalVideos, manualCompletedVideos)
 }
 
 func ToContext(item *model.Task) *Context {
