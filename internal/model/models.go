@@ -180,10 +180,56 @@ type Task struct {
 	Rubric          *ScoringRubric       `gorm:"foreignKey:RubricID"`
 	Creator         *User                `gorm:"foreignKey:CreatorID"`
 	AnalysisReports []TaskAnalysisReport `gorm:"foreignKey:TaskID"`
+	TaskScorers     []TaskScorer         `gorm:"foreignKey:TaskID"`
 }
 
 func (Task) TableName() string {
 	return "tasks"
+}
+
+type TaskScorer struct {
+	ID         uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	TaskID     uuid.UUID  `gorm:"type:uuid;not null;index"`
+	ScorerID   uuid.UUID  `gorm:"type:uuid;not null;index"`
+	Status     string     `gorm:"size:20;not null;default:pending;index"`
+	InvitedBy  *uuid.UUID `gorm:"type:uuid"`
+	InvitedAt  *time.Time
+	AcceptedAt *time.Time
+	RemovedAt  *time.Time
+	Metadata   map[string]any `gorm:"type:jsonb;serializer:json"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	Task       *Task `gorm:"foreignKey:TaskID"`
+	Scorer     *User `gorm:"foreignKey:ScorerID"`
+	Inviter    *User `gorm:"foreignKey:InvitedBy"`
+}
+
+func (TaskScorer) TableName() string {
+	return "task_scorers"
+}
+
+type TaskScorerInvitation struct {
+	ID               uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	TaskID           uuid.UUID `gorm:"type:uuid;not null;index"`
+	ScorerID         uuid.UUID `gorm:"type:uuid;not null;index"`
+	EmailSnapshot    string    `gorm:"size:100;not null"`
+	RealNameSnapshot *string   `gorm:"size:50"`
+	TokenHash        string    `gorm:"size:255;not null;uniqueIndex"`
+	Status           string    `gorm:"size:20;not null;default:sent;index"`
+	SentAt           time.Time
+	ExpiresAt        time.Time `gorm:"index"`
+	RespondedAt      *time.Time
+	CreatedBy        *uuid.UUID     `gorm:"type:uuid"`
+	Metadata         map[string]any `gorm:"type:jsonb;serializer:json"`
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	Task             *Task `gorm:"foreignKey:TaskID"`
+	Scorer           *User `gorm:"foreignKey:ScorerID"`
+	Creator          *User `gorm:"foreignKey:CreatedBy"`
+}
+
+func (TaskScorerInvitation) TableName() string {
+	return "task_scorer_invitations"
 }
 
 type TaskAnalysisReport struct {

@@ -15,11 +15,13 @@ import (
 	"skilljudge/backend/internal/modules/scoring"
 	"skilljudge/backend/internal/modules/system"
 	"skilljudge/backend/internal/modules/task"
+	"skilljudge/backend/internal/modules/taskscorer"
 	"skilljudge/backend/internal/modules/user"
 	"skilljudge/backend/internal/modules/video"
 	"skilljudge/backend/internal/platform/cache"
 	"skilljudge/backend/internal/platform/database"
 	platformjwt "skilljudge/backend/internal/platform/jwt"
+	platformmail "skilljudge/backend/internal/platform/mail"
 	"skilljudge/backend/internal/platform/storage"
 
 	"github.com/gin-gonic/gin"
@@ -63,11 +65,17 @@ func New() (*App, error) {
 	projectService := project.NewService(projectRepo)
 	taskRepo := task.NewRepository(db)
 	storageProvider := storage.NewProvider(cfg.Storage)
+	mailSender, err := platformmail.NewSender(cfg.Mail)
+	if err != nil {
+		return nil, fmt.Errorf("application startup aborted: mail init failed: %w", err)
+	}
 	taskService := task.NewService(taskRepo, projectRepo, storageProvider)
 	aiRepo := ai.NewRepository(db)
 	aiService := ai.NewService(aiRepo, taskService, storageProvider, cfg.AI)
 	scoringRepo := scoring.NewRepository(db)
 	scoringService := scoring.NewService(scoringRepo, aiService, taskService, storageProvider)
+	taskScorerRepo := taskscorer.NewRepository(db)
+	taskScorerService := taskscorer.NewService(taskScorerRepo, taskService, userRepo, mailSender, cfg.Mail.InviteBaseURL)
 	videoRepo := video.NewRepository(db)
 	videoService := video.NewService(videoRepo, aiService, projectRepo, taskService, storageProvider)
 
@@ -81,6 +89,7 @@ func New() (*App, error) {
 	scoringHandler := scoring.NewHandler(scoringService)
 	systemHandler := system.NewHandler(db, redisClient)
 	taskHandler := task.NewHandler(taskService)
+	taskScorerHandler := taskscorer.NewHandler(taskScorerService)
 	userHandler := user.NewHandler(userService)
 	videoHandler := video.NewHandler(videoService)
 
@@ -88,7 +97,7 @@ func New() (*App, error) {
 	router.Use(corsMiddleware())
 	// Route registration stays centralized here so module wiring and
 	// permission boundaries can be audited from a single entry point.
-	registerRoutes(router, authService, userService, authHandler, aiHandler, systemHandler, userHandler, projectHandler, taskHandler, scoringHandler, videoHandler)
+	registerRoutes(router, authService, userService, authHandler, aiHandler, systemHandler, userHandler, projectHandler, taskHandler, taskScorerHandler, scoringHandler, videoHandler)
 
 	return &App{
 		engine:      router,
@@ -144,16 +153,22 @@ func (a *App) Run() error {
 	return a.engine.Run(addr)
 }
 
-func registerRoutes(router *gin.Engine, authService *auth.Service, userService *user.Service, authHandler *auth.Handler, aiHandler *ai.Handler, systemHandler *system.Handler, userHandler *user.Handler, projectHandler *project.Handler, taskHandler *task.Handler, scoringHandler *scoring.Handler, videoHandler *video.Handler) {
+func registerRoutes(router *gin.Engine, authService *auth.Service, userService *user.Service, authHandler *auth.Handler, aiHandler *ai.Handler, systemHandler *system.Handler, userHandler *user.Handler, projectHandler *project.Handler, taskHandler *task.Handler, taskScorerHandler *taskscorer.Handler, scoringHandler *scoring.Handler, videoHandler *video.Handler) {
 	router.GET("/health", systemHandler.Health)
 	router.GET("/ready", systemHandler.Ready)
 
 	api := router.Group("/api/v1")
+	router.GET("/task-scorer-invitations/:token/accept", taskScorerHandler.AcceptPage)
 
 	authGroup := api.Group("/auth")
 	authGroup.POST("/login", authHandler.Login)
 	authGroup.POST("/refresh", authHandler.Refresh)
 	authGroup.POST("/logout", middleware.RequireAuth(authService), authHandler.Logout)
+	api.POST("/task-scorer-invitations/:token/accept", taskScorerHandler.Accept)
+	api.GET("/task-scorer-invitations/my", middleware.RequireAuth(authService), middleware.RequirePermission(userService, "task:read"), taskScorerHandler.ListMine)
+	api.PATCH("/task-scorer-invitations/my/:id/read", middleware.RequireAuth(authService), middleware.RequirePermission(userService, "task:read"), taskScorerHandler.MarkMineRead)
+	api.POST("/task-scorer-invitations/my/:id/accept", middleware.RequireAuth(authService), middleware.RequirePermission(userService, "task:read"), taskScorerHandler.AcceptMine)
+	api.POST("/scorers/provision", middleware.RequireAuth(authService), middleware.RequirePermission(userService, "task:update"), taskScorerHandler.Provision)
 
 	userGroup := api.Group("/users", middleware.RequireAuth(authService))
 	userGroup.GET("/me", userHandler.GetMe)
@@ -176,6 +191,11 @@ func registerRoutes(router *gin.Engine, authService *auth.Service, userService *
 	taskGroup := api.Group("/tasks", middleware.RequireAuth(authService))
 	taskGroup.GET("/my", middleware.RequirePermission(userService, "task:read"), scoringHandler.ListMyTasks)
 	taskGroup.GET("/assignable-scorers", middleware.RequirePermission(userService, "task:update"), scoringHandler.ListAssignableScorers)
+	taskGroup.GET("/:id/scorers", middleware.RequirePermission(userService, "task:update"), taskScorerHandler.List)
+	taskGroup.POST("/:id/scorers/:scorerId/notify", middleware.RequirePermission(userService, "task:update"), taskScorerHandler.Notify)
+	taskGroup.POST("/:id/scorers/invite", middleware.RequirePermission(userService, "task:update"), taskScorerHandler.Invite)
+	taskGroup.POST("/:id/scorers/:scorerId/resend-invite", middleware.RequirePermission(userService, "task:update"), taskScorerHandler.Resend)
+	taskGroup.DELETE("/:id/scorers/:scorerId", middleware.RequirePermission(userService, "task:update"), taskScorerHandler.Remove)
 	taskGroup.GET("/:id/scoreboard", middleware.RequirePermission(userService, "task:read"), taskHandler.GetScoreboard)
 	taskGroup.GET("/:id/analysis", middleware.RequirePermission(userService, "task:read"), taskHandler.GetAnalysis)
 	taskGroup.POST("/:id/analysis-report", middleware.RequirePermission(userService, "task:update"), taskHandler.GenerateAnalysisReport)
@@ -208,6 +228,10 @@ func registerRoutes(router *gin.Engine, authService *auth.Service, userService *
 	videoGroup.POST("/:id/ai-evaluations", middleware.RequirePermission(userService, "task:update"), aiHandler.CreateForVideo)
 	videoGroup.GET("", middleware.RequirePermission(userService, "video:read"), videoHandler.List)
 	videoGroup.GET("/:id", middleware.RequirePermission(userService, "video:read"), videoHandler.Get)
+	videoGroup.POST("/:id/ai-report", middleware.RequirePermission(userService, "task:update"), videoHandler.GenerateAIReport)
+	videoGroup.GET("/:id/ai-report", middleware.RequirePermission(userService, "video:read"), videoHandler.GetAIReport)
+	videoGroup.GET("/:id/ai-report/preview", middleware.RequirePermission(userService, "video:read"), videoHandler.PreviewAIReport)
+	videoGroup.GET("/:id/ai-report/download", middleware.RequirePermission(userService, "video:read"), videoHandler.DownloadAIReport)
 	videoGroup.DELETE("/:id", middleware.RequirePermission(userService, "video:delete"), videoHandler.Delete)
 
 	studentGroup := api.Group("/students", middleware.RequireAuth(authService))

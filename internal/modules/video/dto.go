@@ -130,6 +130,20 @@ type VideoDetailDTO struct {
 	ManualEvaluation *VideoManualEvaluationDTO `json:"manualEvaluation,omitempty"`
 }
 
+type VideoAIReportDTO struct {
+	ReportStatus    string     `json:"reportStatus"`
+	ReportType      string     `json:"reportType"`
+	FileName        *string    `json:"fileName,omitempty"`
+	HTMLFileName    *string    `json:"htmlFileName,omitempty"`
+	PDFStoragePath  *string    `json:"pdfStoragePath,omitempty"`
+	PDFPublicURL    *string    `json:"pdfPublicUrl,omitempty"`
+	HTMLStoragePath *string    `json:"htmlStoragePath,omitempty"`
+	HTMLPublicURL   *string    `json:"htmlPublicUrl,omitempty"`
+	TemplateVersion *string    `json:"templateVersion,omitempty"`
+	GeneratedAt     *time.Time `json:"generatedAt,omitempty"`
+	ErrorMessage    *string    `json:"errorMessage,omitempty"`
+}
+
 func toVideoRubricDTO(rubric *model.ScoringRubric) *VideoRubricDTO {
 	if rubric == nil {
 		return nil

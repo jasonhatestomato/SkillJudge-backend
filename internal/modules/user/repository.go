@@ -43,6 +43,26 @@ func (r *Repository) FindByUsername(ctx context.Context, username string) (*mode
 	return &user, nil
 }
 
+func (r *Repository) FindByEmail(ctx context.Context, email string) (*model.User, error) {
+	normalized := normalizeEmail(email)
+	if normalized == "" {
+		return nil, nil
+	}
+
+	var user model.User
+	err := r.userBaseQuery(ctx).
+		Where("LOWER(BTRIM(users.email)) = ?", normalized).
+		First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &user, nil
+}
+
 func (r *Repository) FindByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
 	var user model.User
 	err := r.userBaseQuery(ctx).
@@ -206,4 +226,8 @@ func (r *Repository) userBaseQuery(ctx context.Context) *gorm.DB {
 				ON primary_roles.id = primary_user_roles.role_id
 				AND primary_roles.status = 'active'
 		`)
+}
+
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }

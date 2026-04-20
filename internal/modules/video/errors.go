@@ -14,4 +14,6 @@ var (
 	ErrVideoPartsRequired         = errors.New("parts are required")
 	ErrInvalidVideoScope          = errors.New("forbidden video scope")
 	ErrRoleNotAllowed             = errors.New("role not allowed")
+	ErrVideoAIReportNotFound      = errors.New("video ai report not found")
+	ErrVideoAIReportNotReady      = errors.New("video ai report is not ready")
 )

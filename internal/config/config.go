@@ -19,6 +19,8 @@ const (
 	defaultUserCacheTTL       = time.Hour
 	defaultPermissionCacheTTL = 30 * time.Minute
 	defaultSTSTTL             = 30 * time.Minute
+	defaultMailProvider       = "smtp"
+	defaultMailTimeout        = 10 * time.Second
 )
 
 type Config struct {
@@ -29,6 +31,7 @@ type Config struct {
 	JWT       JWTConfig
 	AI        AIConfig
 	Storage   StorageConfig
+	Mail      MailConfig
 	Bootstrap BootstrapConfig
 }
 
@@ -88,6 +91,19 @@ type StorageConfig struct {
 	AccessKeyID     string
 	AccessKeySecret string
 	STSTTL          time.Duration
+}
+
+type MailConfig struct {
+	Enabled       bool
+	Provider      string
+	FromName      string
+	FromAddress   string
+	InviteBaseURL string
+	SMTPHost      string
+	SMTPPort      int
+	SMTPUsername  string
+	SMTPPassword  string
+	Timeout       time.Duration
 }
 
 type BootstrapConfig struct {
@@ -152,6 +168,18 @@ func Load() (Config, error) {
 			AccessKeyID:     getEnv("STORAGE_ACCESS_KEY_ID", ""),
 			AccessKeySecret: getEnv("STORAGE_ACCESS_KEY_SECRET", ""),
 			STSTTL:          getEnvDuration("STORAGE_STS_TTL", defaultSTSTTL),
+		},
+		Mail: MailConfig{
+			Enabled:       getEnvBool("MAIL_ENABLED", false),
+			Provider:      getEnv("MAIL_PROVIDER", defaultMailProvider),
+			FromName:      getEnv("MAIL_FROM_NAME", "SkillJudge"),
+			FromAddress:   getEnv("MAIL_FROM_ADDRESS", ""),
+			InviteBaseURL: getEnv("MAIL_INVITE_BASE_URL", ""),
+			SMTPHost:      getEnv("MAIL_SMTP_HOST", "smtp.qq.com"),
+			SMTPPort:      getEnvInt("MAIL_SMTP_PORT", 465),
+			SMTPUsername:  getEnv("MAIL_SMTP_USERNAME", ""),
+			SMTPPassword:  getEnv("MAIL_SMTP_PASSWORD", ""),
+			Timeout:       getEnvDuration("MAIL_TIMEOUT", defaultMailTimeout),
 		},
 		Bootstrap: BootstrapConfig{
 			Enabled:           getEnvBool("BOOTSTRAP_ENABLED", false),

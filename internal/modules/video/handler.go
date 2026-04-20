@@ -2,6 +2,7 @@ package video
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -268,4 +269,110 @@ func (h *Handler) Delete(c *gin.Context) {
 	}
 
 	response.NoContent(c)
+}
+
+func (h *Handler) GenerateAIReport(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	videoID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid video id", nil)
+		return
+	}
+
+	result, err := h.service.GenerateAIReport(c.Request.Context(), actor, videoID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrVideoNotFound):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, ErrVideoAIReportNotReady):
+			response.Error(c, http.StatusConflict, err.Error(), nil)
+		case errors.Is(err, ErrInvalidVideoScope), errors.Is(err, ErrRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			log.Printf("video.GenerateAIReport failed: actor=%s video=%s err=%v", actor.UserID, videoID, err)
+			response.Error(c, http.StatusInternalServerError, "failed to generate video ai report", nil)
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, result)
+}
+
+func (h *Handler) GetAIReport(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	videoID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid video id", nil)
+		return
+	}
+
+	result, err := h.service.GetAIReport(c.Request.Context(), actor, videoID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrVideoNotFound), errors.Is(err, ErrVideoAIReportNotFound):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, ErrInvalidVideoScope), errors.Is(err, ErrRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to load video ai report", nil)
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, result)
+}
+
+func (h *Handler) PreviewAIReport(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	videoID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid video id", nil)
+		return
+	}
+
+	html, err := h.service.RenderAIReportHTML(c.Request.Context(), actor, videoID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrVideoNotFound):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, ErrVideoAIReportNotReady):
+			response.Error(c, http.StatusConflict, err.Error(), nil)
+		case errors.Is(err, ErrInvalidVideoScope), errors.Is(err, ErrRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to preview video ai report", nil)
+		}
+		return
+	}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.String(http.StatusOK, html)
+}
+
+func (h *Handler) DownloadAIReport(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	videoID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid video id", nil)
+		return
+	}
+
+	pdfBytes, fileName, err := h.service.RenderAIReportPDF(c.Request.Context(), actor, videoID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrVideoNotFound):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, ErrVideoAIReportNotReady):
+			response.Error(c, http.StatusConflict, err.Error(), nil)
+		case errors.Is(err, ErrInvalidVideoScope), errors.Is(err, ErrRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to download video ai report", nil)
+		}
+		return
+	}
+
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileName))
+	c.Data(http.StatusOK, "application/pdf", pdfBytes)
 }

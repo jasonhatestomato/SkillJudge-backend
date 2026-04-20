@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"skilljudge/backend/internal/config"
@@ -72,6 +73,7 @@ type Provider interface {
 	CreateMultipartUpload(ctx context.Context, input CreateMultipartUploadInput) (*MultipartUploadSession, error)
 	CompleteMultipartUpload(ctx context.Context, input CompleteMultipartUploadInput) (*CompleteMultipartUploadResult, error)
 	PutObject(ctx context.Context, input PutObjectInput) (*PutObjectResult, error)
+	GetObject(ctx context.Context, objectKey string) ([]byte, error)
 	DeleteObject(ctx context.Context, objectKey string) error
 	GeneratePlayURL(ctx context.Context, objectKey string, expires time.Duration) (string, error)
 }
@@ -94,6 +96,8 @@ type mockProvider struct {
 	publicBaseURL string
 	bucket        string
 	region        string
+	mu            sync.RWMutex
+	objects       map[string][]byte
 }
 
 func newMockProvider(cfg config.StorageConfig) Provider {
@@ -111,6 +115,7 @@ func newMockProvider(cfg config.StorageConfig) Provider {
 		publicBaseURL: baseURL,
 		bucket:        bucket,
 		region:        cfg.Region,
+		objects:       make(map[string][]byte),
 	}
 }
 
@@ -137,10 +142,24 @@ func (p *mockProvider) CompleteMultipartUpload(_ context.Context, input Complete
 }
 
 func (p *mockProvider) PutObject(_ context.Context, input PutObjectInput) (*PutObjectResult, error) {
+	p.mu.Lock()
+	p.objects[input.ObjectKey] = append([]byte(nil), input.Body...)
+	p.mu.Unlock()
+
 	return &PutObjectResult{
 		StorageURL:  fmt.Sprintf("%s/%s/%s", p.publicBaseURL, p.bucket, input.ObjectKey),
 		StoragePath: input.ObjectKey,
 	}, nil
+}
+
+func (p *mockProvider) GetObject(_ context.Context, objectKey string) ([]byte, error) {
+	p.mu.RLock()
+	body, ok := p.objects[objectKey]
+	p.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("object not found: %s", objectKey)
+	}
+	return append([]byte(nil), body...), nil
 }
 
 func (p *mockProvider) DeleteObject(_ context.Context, _ string) error {
@@ -262,6 +281,24 @@ func (p *obsProvider) PutObject(_ context.Context, input PutObjectInput) (*PutOb
 		StorageURL:  fmt.Sprintf("%s/%s", p.publicBaseURL, input.ObjectKey),
 		StoragePath: input.ObjectKey,
 	}, nil
+}
+
+func (p *obsProvider) GetObject(_ context.Context, objectKey string) ([]byte, error) {
+	req := &obs.GetObjectInput{}
+	req.Bucket = p.bucket
+	req.Key = objectKey
+
+	resp, err := p.client.GetObject(req)
+	if err != nil {
+		return nil, fmt.Errorf("get object: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read object body: %w", err)
+	}
+	return body, nil
 }
 
 func (p *obsProvider) DeleteObject(_ context.Context, objectKey string) error {

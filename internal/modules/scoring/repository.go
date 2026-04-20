@@ -17,6 +17,8 @@ type Repository struct {
 	db *gorm.DB
 }
 
+const videoSelectableColumns = "videos.*"
+
 func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
@@ -132,12 +134,13 @@ func (r *Repository) FindAssignedVideoDetail(ctx context.Context, videoID, score
 	var item model.Video
 	err := r.db.WithContext(ctx).
 		Model(&model.Video{}).
-		Preload("Project").
+		Select(videoSelectableColumns).
 		Preload("Task").
 		Preload("Task.Project").
 		Preload("Task.Project.School").
 		Preload("Task.Rubric").
 		Preload("Scorer").
+		Joins("JOIN task_scorers ON task_scorers.task_id = videos.task_id AND task_scorers.scorer_id = videos.scorer_id AND task_scorers.status = ?", "accepted").
 		Where("videos.id = ?", videoID).
 		Where("videos.scorer_id = ?", scorerID).
 		First(&item).Error
@@ -264,41 +267,43 @@ func startedAtFromVideo(video *model.Video, fallback time.Time) *time.Time {
 }
 
 func (r *Repository) ListAssignedVideos(ctx context.Context, scorerID uuid.UUID, params MyTasksListParams) ([]model.Video, int64, error) {
-	query := r.db.WithContext(ctx).
+	baseQuery := r.db.WithContext(ctx).
 		Model(&model.Video{}).
-		Preload("Project").
 		Preload("Task").
 		Preload("Task.Project").
 		Preload("Task.Project.School").
 		Preload("Task.Rubric").
 		Preload("Scorer").
+		Joins("JOIN task_scorers ON task_scorers.task_id = videos.task_id AND task_scorers.scorer_id = videos.scorer_id AND task_scorers.status = ?", "accepted").
 		Where("videos.scorer_id = ?", scorerID)
 
 	if params.ProjectID != nil && *params.ProjectID != uuid.Nil {
-		query = query.Joins("JOIN tasks ON tasks.id = videos.task_id").
+		baseQuery = baseQuery.Joins("JOIN tasks ON tasks.id = videos.task_id").
 			Where("tasks.project_id = ?", *params.ProjectID)
 	}
 	if status := strings.TrimSpace(params.Status); status != "" {
 		switch status {
 		case evaluation.OverallStatusPending:
-			query = query.Where("videos.manual_status = ?", evaluation.ManualStatusPending)
+			baseQuery = baseQuery.Where("videos.manual_status = ?", evaluation.ManualStatusPending)
 		case evaluation.OverallStatusInProgress:
-			query = query.Where("videos.manual_status = ?", evaluation.ManualStatusInProgress)
+			baseQuery = baseQuery.Where("videos.manual_status = ?", evaluation.ManualStatusInProgress)
 		case evaluation.OverallStatusCompleted:
-			query = query.Where("videos.manual_status = ?", evaluation.ManualStatusSubmitted)
+			baseQuery = baseQuery.Where("videos.manual_status = ?", evaluation.ManualStatusSubmitted)
 		case "skipped":
-			query = query.Where("1 = 0")
+			baseQuery = baseQuery.Where("1 = 0")
 		}
 	}
 
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	if err := baseQuery.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	offset := (params.Page - 1) * params.PageSize
 	var items []model.Video
-	if err := query.Order("videos.assigned_at DESC NULLS LAST, videos.created_at DESC").
+	if err := baseQuery.
+		Select(videoSelectableColumns).
+		Order("videos.assigned_at DESC NULLS LAST, videos.created_at DESC").
 		Offset(offset).
 		Limit(params.PageSize).
 		Find(&items).Error; err != nil {
