@@ -136,6 +136,18 @@ func (r *Repository) UpdateInvitation(ctx context.Context, id uuid.UUID, updates
 		Updates(updates).Error
 }
 
+func (r *Repository) CancelSentInvitations(ctx context.Context, taskID, scorerID uuid.UUID, updatedAt time.Time) error {
+	return r.db.WithContext(ctx).
+		Model(&model.TaskScorerInvitation{}).
+		Where("task_id = ?", taskID).
+		Where("scorer_id = ?", scorerID).
+		Where("status = ?", "sent").
+		Updates(map[string]any{
+			"status":     "cancelled",
+			"updated_at": updatedAt,
+		}).Error
+}
+
 func (r *Repository) FindLatestInvitationsByTaskAndScorerIDs(ctx context.Context, taskID uuid.UUID, scorerIDs []uuid.UUID) (map[uuid.UUID]*model.TaskScorerInvitation, error) {
 	result := make(map[uuid.UUID]*model.TaskScorerInvitation)
 	if len(scorerIDs) == 0 {

@@ -385,6 +385,27 @@ func (s *Service) Notify(ctx context.Context, actor user.UserContext, taskID, sc
 	}, nil
 }
 
+func (s *Service) EnsureNotificationIfNeeded(ctx context.Context, actor user.UserContext, taskID, scorerID uuid.UUID) (bool, error) {
+	resolvedTask, err := s.taskService.ResolveManageable(ctx, actor, taskID)
+	if err != nil {
+		return false, err
+	}
+
+	taskScorer, err := s.repo.FindTaskScorer(ctx, resolvedTask.TaskID, scorerID)
+	if err != nil {
+		return false, err
+	}
+	if taskScorer != nil && taskScorer.Status == "accepted" {
+		return false, nil
+	}
+
+	_, notifyErr := s.Notify(ctx, actor, resolvedTask.TaskID, scorerID)
+	if notifyErr != nil {
+		return false, notifyErr
+	}
+	return true, nil
+}
+
 func (s *Service) Resend(ctx context.Context, actor user.UserContext, taskID, scorerID uuid.UUID) (*ResendTaskScorerInvitationResult, error) {
 	resolvedTask, err := s.taskService.ResolveManageable(ctx, actor, taskID)
 	if err != nil {
@@ -498,6 +519,31 @@ func (s *Service) Remove(ctx context.Context, actor user.UserContext, taskID, sc
 		ScorerID: scorerID,
 		Status:   "inactive",
 	}, nil
+}
+
+func (s *Service) ExpirePendingRelation(ctx context.Context, actor user.UserContext, taskID, scorerID uuid.UUID) error {
+	resolvedTask, err := s.taskService.ResolveManageable(ctx, actor, taskID)
+	if err != nil {
+		return err
+	}
+
+	taskScorer, err := s.repo.FindTaskScorer(ctx, resolvedTask.TaskID, scorerID)
+	if err != nil {
+		return err
+	}
+	if taskScorer == nil || taskScorer.Status != "pending" {
+		return nil
+	}
+
+	now := time.Now()
+	if err := s.repo.CancelSentInvitations(ctx, resolvedTask.TaskID, scorerID, now); err != nil {
+		return err
+	}
+	return s.repo.UpdateTaskScorer(ctx, taskScorer.ID, map[string]any{
+		"status":     "inactive",
+		"removed_at": now,
+		"updated_at": now,
+	})
 }
 
 func (s *Service) Accept(ctx context.Context, token string) (*AcceptTaskScorerInvitationResult, error) {

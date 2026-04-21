@@ -3,7 +3,9 @@ package scoring
 import (
 	"context"
 	"math"
+	"math/rand"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,15 +19,27 @@ import (
 	"github.com/google/uuid"
 )
 
+type taskScorerCoordinator interface {
+	EnsureNotificationIfNeeded(ctx context.Context, actor user.UserContext, taskID, scorerID uuid.UUID) (bool, error)
+	ExpirePendingRelation(ctx context.Context, actor user.UserContext, taskID, scorerID uuid.UUID) error
+}
+
 type Service struct {
 	repo        *Repository
 	aiService   *ai.Service
 	taskService *task.Service
 	storage     storage.Provider
+	taskScorers taskScorerCoordinator
 }
 
-func NewService(repo *Repository, aiService *ai.Service, taskService *task.Service, storageProvider storage.Provider) *Service {
-	return &Service{repo: repo, aiService: aiService, taskService: taskService, storage: storageProvider}
+func NewService(repo *Repository, aiService *ai.Service, taskService *task.Service, storageProvider storage.Provider, taskScorers taskScorerCoordinator) *Service {
+	return &Service{
+		repo:        repo,
+		aiService:   aiService,
+		taskService: taskService,
+		storage:     storageProvider,
+		taskScorers: taskScorers,
+	}
 }
 
 func (s *Service) ListMyTasks(ctx context.Context, actor user.UserContext, params MyTasksListParams) (*MyTasksResult, error) {
@@ -229,6 +243,177 @@ func (s *Service) AssignScorers(ctx context.Context, actor user.UserContext, inp
 	}, nil
 }
 
+func (s *Service) ListPendingAssignments(ctx context.Context, actor user.UserContext, taskID uuid.UUID) (*PendingAssignmentsResult, error) {
+	if !canAssignScorers(actor.Role) {
+		return nil, ErrAssignmentRoleNotAllowed
+	}
+	resolvedTask, err := s.taskService.ResolveManageable(ctx, actor, taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	videos, err := s.repo.ListPendingVideosByTask(ctx, resolvedTask.TaskID)
+	if err != nil {
+		return nil, err
+	}
+
+	taskScorerStatuses, err := s.repo.ListTaskScorerStatuses(ctx, resolvedTask.TaskID)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]PendingAssignmentVideoDTO, 0, len(videos))
+	for i := range videos {
+		videoItem := videos[i]
+		scorerName := "未分配"
+		scorerStatus := "unassigned"
+		currentTaskState := "待分配"
+		if videoItem.Scorer != nil {
+			scorerName = strings.TrimSpace(displayNameForScorer(videoItem.Scorer))
+		}
+		if videoItem.ScorerID != nil {
+			if status, ok := taskScorerStatuses[*videoItem.ScorerID]; ok {
+				scorerStatus = status
+				if status == "accepted" {
+					currentTaskState = "已确认分配"
+				} else if status == "pending" {
+					currentTaskState = "待确认预分配"
+				}
+			} else {
+				scorerStatus = "unknown"
+			}
+		}
+
+		items = append(items, PendingAssignmentVideoDTO{
+			ID:               videoItem.ID,
+			StudentName:      videoItem.StudentName,
+			StudentNumber:    videoItem.StudentNumber,
+			Filename:         videoItem.Filename,
+			ScorerID:         videoItem.ScorerID,
+			ScorerName:       scorerName,
+			ScorerStatus:     scorerStatus,
+			ManualStatus:     videoItem.ManualStatus,
+			AssignedAt:       videoItem.AssignedAt,
+			IsReassignable:   videoItem.ManualStatus == evaluation.ManualStatusPending,
+			CurrentTaskState: currentTaskState,
+		})
+	}
+
+	return &PendingAssignmentsResult{
+		Items: items,
+		Total: len(items),
+	}, nil
+}
+
+func (s *Service) ReassignPendingVideos(ctx context.Context, actor user.UserContext, input ReassignPendingVideosInput) (*ReassignPendingVideosResult, error) {
+	if err := validateReassignPendingVideosInput(input); err != nil {
+		return nil, err
+	}
+	if !canAssignScorers(actor.Role) {
+		return nil, ErrAssignmentRoleNotAllowed
+	}
+
+	resolvedTask, err := s.taskService.ResolveManageable(ctx, actor, input.TaskID)
+	if err != nil {
+		return nil, err
+	}
+
+	videos, err := s.repo.FindVideosByTaskAndIDs(ctx, input.TaskID, input.VideoIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(videos) != len(uniqueUUIDs(input.VideoIDs)) {
+		return nil, ErrAssignmentVideoNotFound
+	}
+	if err := validateReassignablePendingVideos(videos); err != nil {
+		return nil, err
+	}
+
+	scorers, err := s.repo.FindAssignableScorers(ctx, resolvedTask.SchoolID, input.ScorerIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(scorers) != len(uniqueUUIDs(input.ScorerIDs)) {
+		return nil, ErrAssignmentScorerNotFound
+	}
+
+	assignments, err := buildReassignments(input, videos, scorers)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceScorers := collectSourceScorerIDs(videos)
+	assignedAt := time.Now()
+	if err := s.repo.AssignScorers(ctx, videos, assignments, assignedAt); err != nil {
+		return nil, err
+	}
+
+	notifiedScorerIDs := make([]uuid.UUID, 0, len(input.ScorerIDs))
+	if s.taskScorers != nil {
+		for _, scorerID := range uniqueUUIDs(input.ScorerIDs) {
+			notified, notifyErr := s.taskScorers.EnsureNotificationIfNeeded(ctx, actor, resolvedTask.TaskID, scorerID)
+			if notifyErr != nil {
+				return nil, notifyErr
+			}
+			if notified {
+				notifiedScorerIDs = append(notifiedScorerIDs, scorerID)
+			}
+		}
+	}
+
+	expiredSourceScorerIDs := make([]uuid.UUID, 0, len(sourceScorers))
+	for _, scorerID := range sourceScorers {
+		if scorerID == uuid.Nil || slices.Contains(input.ScorerIDs, scorerID) {
+			continue
+		}
+		remaining, countErr := s.repo.CountVideosByTaskAndScorer(ctx, resolvedTask.TaskID, scorerID)
+		if countErr != nil {
+			return nil, countErr
+		}
+		if remaining > 0 || s.taskScorers == nil {
+			continue
+		}
+		if expireErr := s.taskScorers.ExpirePendingRelation(ctx, actor, resolvedTask.TaskID, scorerID); expireErr != nil {
+			return nil, expireErr
+		}
+		expiredSourceScorerIDs = append(expiredSourceScorerIDs, scorerID)
+	}
+
+	assigned := make([]AssignedTaskDTO, 0, len(assignments))
+	for _, videoID := range input.VideoIDs {
+		scorerID, ok := assignments[videoID]
+		if !ok {
+			continue
+		}
+		videoItem := findVideoByID(videos, videoID)
+		scorerItem := findScorerByID(scorers, scorerID)
+		if videoItem == nil || scorerItem == nil {
+			continue
+		}
+		videoItem.ScorerID = &scorerID
+		videoItem.Scorer = scorerItem
+		videoItem.ManualStatus = evaluation.ManualStatusPending
+		videoItem.EvaluationStatus = evaluation.ResolveOverallStatus(videoItem.ManualStatus, videoItem.AIStatus)
+		videoItem.AssignedAt = &assignedAt
+		assigned = append(assigned, toAssignedTaskDTO(videoItem, scorerItem))
+	}
+
+	sort.Slice(notifiedScorerIDs, func(i, j int) bool {
+		return notifiedScorerIDs[i].String() < notifiedScorerIDs[j].String()
+	})
+	sort.Slice(expiredSourceScorerIDs, func(i, j int) bool {
+		return expiredSourceScorerIDs[i].String() < expiredSourceScorerIDs[j].String()
+	})
+
+	return &ReassignPendingVideosResult{
+		Total:                  len(input.VideoIDs),
+		Created:                len(assigned),
+		Tasks:                  assigned,
+		NotifiedScorerIDs:      notifiedScorerIDs,
+		ExpiredSourceScorerIDs: expiredSourceScorerIDs,
+	}, nil
+}
+
 func (s *Service) latestAIEvaluation(ctx context.Context, videoID uuid.UUID) (*ai.EmbeddedEvaluationDTO, error) {
 	if s.aiService == nil {
 		return nil, nil
@@ -294,6 +479,59 @@ func validateAssignableVideos(videos []model.Video) error {
 	return nil
 }
 
+func validateReassignablePendingVideos(videos []model.Video) error {
+	if err := validateAssignableVideos(videos); err != nil {
+		return err
+	}
+	for _, item := range videos {
+		if item.ManualStatus != evaluation.ManualStatusPending {
+			return ErrAssignmentVideoCompleted
+		}
+	}
+	return nil
+}
+
+func validateReassignPendingVideosInput(input ReassignPendingVideosInput) error {
+	if input.TaskID == uuid.Nil {
+		return task.ErrTaskNotFound
+	}
+	if len(input.VideoIDs) == 0 {
+		return ErrAssignmentVideoIDsRequired
+	}
+	if len(input.ScorerIDs) == 0 {
+		return ErrAssignmentScorerIDsRequired
+	}
+	switch input.ReassignmentMode {
+	case ReassignmentModeAverage:
+		return nil
+	case ReassignmentModeQuantity:
+		if len(input.QuantityAssignments) == 0 {
+			return ErrReassignmentCountRequired
+		}
+		total := 0
+		seen := make(map[uuid.UUID]struct{}, len(input.QuantityAssignments))
+		for _, item := range input.QuantityAssignments {
+			if item.ScorerID == uuid.Nil || item.Count <= 0 {
+				return ErrReassignmentCountInvalid
+			}
+			if _, ok := seen[item.ScorerID]; ok {
+				return ErrReassignmentCountInvalid
+			}
+			seen[item.ScorerID] = struct{}{}
+			total += item.Count
+		}
+		if total != len(uniqueUUIDs(input.VideoIDs)) {
+			return ErrReassignmentCountMismatch
+		}
+		return nil
+	default:
+		if strings.TrimSpace(string(input.ReassignmentMode)) == "" {
+			return ErrReassignmentModeRequired
+		}
+		return ErrReassignmentModeInvalid
+	}
+}
+
 func buildAssignments(input AssignScorersInput, videos []model.Video, scorers []model.User) (map[uuid.UUID]uuid.UUID, error) {
 	videoByID := make(map[uuid.UUID]model.Video, len(videos))
 	for _, item := range videos {
@@ -335,6 +573,57 @@ func buildAssignments(input AssignScorersInput, videos []model.Video, scorers []
 	return assignments, nil
 }
 
+func buildReassignments(input ReassignPendingVideosInput, videos []model.Video, scorers []model.User) (map[uuid.UUID]uuid.UUID, error) {
+	videoByID := make(map[uuid.UUID]model.Video, len(videos))
+	videoIDs := make([]uuid.UUID, 0, len(videos))
+	for _, item := range videos {
+		videoByID[item.ID] = item
+		videoIDs = append(videoIDs, item.ID)
+	}
+	scorerIDs := make([]uuid.UUID, 0, len(scorers))
+	for _, scorer := range scorers {
+		scorerIDs = append(scorerIDs, scorer.ID)
+	}
+
+	shuffleUUIDs(videoIDs)
+	assignments := make(map[uuid.UUID]uuid.UUID, len(videoIDs))
+
+	switch input.ReassignmentMode {
+	case ReassignmentModeAverage:
+		for idx, videoID := range videoIDs {
+			assignments[videoID] = scorerIDs[idx%len(scorerIDs)]
+		}
+	case ReassignmentModeQuantity:
+		position := 0
+		for _, item := range input.QuantityAssignments {
+			if !slices.Contains(scorerIDs, item.ScorerID) {
+				return nil, ErrReassignmentCountInvalid
+			}
+			for i := 0; i < item.Count; i++ {
+				if position >= len(videoIDs) {
+					return nil, ErrReassignmentCountMismatch
+				}
+				assignments[videoIDs[position]] = item.ScorerID
+				position++
+			}
+		}
+		if position != len(videoIDs) {
+			return nil, ErrReassignmentCountMismatch
+		}
+	}
+
+	for _, videoID := range input.VideoIDs {
+		if _, ok := videoByID[videoID]; !ok {
+			return nil, ErrAssignmentVideoNotFound
+		}
+		if _, ok := assignments[videoID]; !ok {
+			return nil, ErrReassignmentCountMismatch
+		}
+	}
+
+	return assignments, nil
+}
+
 func uniqueUUIDs(items []uuid.UUID) []uuid.UUID {
 	seen := make(map[uuid.UUID]struct{}, len(items))
 	result := make([]uuid.UUID, 0, len(items))
@@ -367,4 +656,46 @@ func findScorerByID(items []model.User, id uuid.UUID) *model.User {
 		}
 	}
 	return nil
+}
+
+func collectSourceScorerIDs(videos []model.Video) []uuid.UUID {
+	seen := make(map[uuid.UUID]struct{}, len(videos))
+	result := make([]uuid.UUID, 0, len(videos))
+	for _, item := range videos {
+		if item.ScorerID == nil || *item.ScorerID == uuid.Nil {
+			continue
+		}
+		if _, ok := seen[*item.ScorerID]; ok {
+			continue
+		}
+		seen[*item.ScorerID] = struct{}{}
+		result = append(result, *item.ScorerID)
+	}
+	return result
+}
+
+func shuffleUUIDs(items []uuid.UUID) {
+	if len(items) <= 1 {
+		return
+	}
+	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd.Shuffle(len(items), func(i, j int) {
+		items[i], items[j] = items[j], items[i]
+	})
+}
+
+func displayNameForScorer(scorer *model.User) string {
+	if scorer == nil {
+		return "评分员"
+	}
+	if scorer.RealName != nil && strings.TrimSpace(*scorer.RealName) != "" {
+		return strings.TrimSpace(*scorer.RealName)
+	}
+	if strings.TrimSpace(scorer.Username) != "" {
+		return strings.TrimSpace(scorer.Username)
+	}
+	if scorer.Email != nil && strings.TrimSpace(*scorer.Email) != "" {
+		return strings.TrimSpace(*scorer.Email)
+	}
+	return "评分员"
 }

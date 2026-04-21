@@ -16,6 +16,13 @@ const (
 	AssignmentStrategySpecific AssignmentStrategy = "specific"
 )
 
+type ReassignmentMode string
+
+const (
+	ReassignmentModeAverage  ReassignmentMode = "average"
+	ReassignmentModeQuantity ReassignmentMode = "quantity"
+)
+
 type SpecificAssignment struct {
 	VideoID  uuid.UUID `json:"videoId"`
 	ScorerID uuid.UUID `json:"scorerId"`
@@ -27,6 +34,46 @@ type AssignScorersInput struct {
 	ScorerIDs           []uuid.UUID
 	AssignmentStrategy  AssignmentStrategy
 	SpecificAssignments []SpecificAssignment
+}
+
+type QuantityAssignment struct {
+	ScorerID uuid.UUID `json:"scorerId"`
+	Count    int       `json:"count"`
+}
+
+type PendingAssignmentVideoDTO struct {
+	ID               uuid.UUID  `json:"id"`
+	StudentName      string     `json:"studentName"`
+	StudentNumber    string     `json:"studentNumber"`
+	Filename         string     `json:"filename"`
+	ScorerID         *uuid.UUID `json:"scorerId,omitempty"`
+	ScorerName       string     `json:"scorerName"`
+	ScorerStatus     string     `json:"scorerStatus"`
+	ManualStatus     string     `json:"manualStatus"`
+	AssignedAt       *time.Time `json:"assignedAt,omitempty"`
+	IsReassignable   bool       `json:"isReassignable"`
+	CurrentTaskState string     `json:"currentTaskState"`
+}
+
+type PendingAssignmentsResult struct {
+	Items []PendingAssignmentVideoDTO `json:"items"`
+	Total int                         `json:"total"`
+}
+
+type ReassignPendingVideosInput struct {
+	TaskID              uuid.UUID
+	VideoIDs            []uuid.UUID
+	ScorerIDs           []uuid.UUID
+	ReassignmentMode    ReassignmentMode
+	QuantityAssignments []QuantityAssignment
+}
+
+type ReassignPendingVideosResult struct {
+	Total                  int               `json:"total"`
+	Created                int               `json:"created"`
+	Tasks                  []AssignedTaskDTO `json:"tasks"`
+	NotifiedScorerIDs      []uuid.UUID       `json:"notifiedScorerIds,omitempty"`
+	ExpiredSourceScorerIDs []uuid.UUID       `json:"expiredSourceScorerIds,omitempty"`
 }
 
 type AssignmentTaskVideoDTO struct {

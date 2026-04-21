@@ -27,6 +27,16 @@ type assignScorersRequest struct {
 	} `json:"specificAssignments"`
 }
 
+type reassignPendingVideosRequest struct {
+	VideoIDs            []string `json:"videoIds" binding:"required"`
+	ScorerIDs           []string `json:"scorerIds" binding:"required"`
+	ReassignmentMode    string   `json:"reassignmentMode" binding:"required"`
+	QuantityAssignments []struct {
+		ScorerID string `json:"scorerId"`
+		Count    int    `json:"count"`
+	} `json:"quantityAssignments"`
+}
+
 type submitTaskRequest struct {
 	ScoreDetails []map[string]any `json:"scoreDetails" binding:"required"`
 	TotalScore   float64          `json:"totalScore"`
@@ -218,6 +228,99 @@ func (h *Handler) AssignScorers(c *gin.Context) {
 	}
 
 	response.Success(c, http.StatusCreated, result)
+}
+
+func (h *Handler) ListPendingAssignments(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	taskID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid task id", nil)
+		return
+	}
+
+	result, err := h.service.ListPendingAssignments(c.Request.Context(), actor, taskID)
+	if err != nil {
+		switch {
+		case errors.Is(err, task.ErrTaskNotFound):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, task.ErrTaskProjectScope), errors.Is(err, task.ErrTaskRoleNotAllowed), errors.Is(err, ErrAssignmentRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to list pending assignments", nil)
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, result)
+}
+
+func (h *Handler) ReassignPendingVideos(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	taskID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid task id", nil)
+		return
+	}
+
+	var req reassignPendingVideosRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid request payload", nil)
+		return
+	}
+
+	videoIDs, err := parseUUIDList(req.VideoIDs)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid videoIds", nil)
+		return
+	}
+	scorerIDs, err := parseUUIDList(req.ScorerIDs)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid scorerIds", nil)
+		return
+	}
+	quantityAssignments := make([]QuantityAssignment, 0, len(req.QuantityAssignments))
+	for _, item := range req.QuantityAssignments {
+		scorerID, parseErr := uuid.Parse(item.ScorerID)
+		if parseErr != nil {
+			response.Error(c, http.StatusBadRequest, "invalid quantityAssignments.scorerId", nil)
+			return
+		}
+		quantityAssignments = append(quantityAssignments, QuantityAssignment{
+			ScorerID: scorerID,
+			Count:    item.Count,
+		})
+	}
+
+	result, err := h.service.ReassignPendingVideos(c.Request.Context(), actor, ReassignPendingVideosInput{
+		TaskID:              taskID,
+		VideoIDs:            videoIDs,
+		ScorerIDs:           scorerIDs,
+		ReassignmentMode:    ReassignmentMode(req.ReassignmentMode),
+		QuantityAssignments: quantityAssignments,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrAssignmentVideoIDsRequired),
+			errors.Is(err, ErrAssignmentScorerIDsRequired),
+			errors.Is(err, ErrAssignmentVideoNotReady),
+			errors.Is(err, ErrAssignmentVideoCompleted),
+			errors.Is(err, ErrReassignmentModeRequired),
+			errors.Is(err, ErrReassignmentModeInvalid),
+			errors.Is(err, ErrReassignmentCountRequired),
+			errors.Is(err, ErrReassignmentCountInvalid),
+			errors.Is(err, ErrReassignmentCountMismatch):
+			response.Error(c, http.StatusBadRequest, err.Error(), nil)
+		case errors.Is(err, task.ErrTaskNotFound), errors.Is(err, ErrAssignmentVideoNotFound), errors.Is(err, ErrAssignmentScorerNotFound):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, task.ErrTaskProjectScope), errors.Is(err, task.ErrTaskRoleNotAllowed), errors.Is(err, ErrAssignmentRoleNotAllowed):
+			response.Error(c, http.StatusForbidden, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to reassign pending videos", nil)
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, result)
 }
 
 func parseUUIDList(items []string) ([]uuid.UUID, error) {

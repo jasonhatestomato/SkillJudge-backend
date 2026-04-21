@@ -27,6 +27,7 @@ func (r *Repository) FindVideosByTaskAndIDs(ctx context.Context, taskID uuid.UUI
 	var items []model.Video
 	if err := r.db.WithContext(ctx).
 		Model(&model.Video{}).
+		Select(videoSelectableColumns).
 		Preload("Scorer").
 		Where("task_id = ?", taskID).
 		Where("id IN ?", videoIDs).
@@ -35,6 +36,57 @@ func (r *Repository) FindVideosByTaskAndIDs(ctx context.Context, taskID uuid.UUI
 	}
 
 	return items, nil
+}
+
+func (r *Repository) ListPendingVideosByTask(ctx context.Context, taskID uuid.UUID) ([]model.Video, error) {
+	var items []model.Video
+	err := r.db.WithContext(ctx).
+		Model(&model.Video{}).
+		Select(videoSelectableColumns).
+		Preload("Scorer").
+		Where("task_id = ?", taskID).
+		Where("manual_status = ?", evaluation.ManualStatusPending).
+		Order("assigned_at DESC NULLS LAST, created_at DESC").
+		Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func (r *Repository) ListTaskScorerStatuses(ctx context.Context, taskID uuid.UUID) (map[uuid.UUID]string, error) {
+	type row struct {
+		ScorerID uuid.UUID
+		Status   string
+	}
+
+	var rows []row
+	if err := r.db.WithContext(ctx).
+		Model(&model.TaskScorer{}).
+		Select("scorer_id, status").
+		Where("task_id = ?", taskID).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[uuid.UUID]string, len(rows))
+	for _, item := range rows {
+		result[item.ScorerID] = item.Status
+	}
+	return result, nil
+}
+
+func (r *Repository) CountVideosByTaskAndScorer(ctx context.Context, taskID, scorerID uuid.UUID) (int64, error) {
+	var total int64
+	if err := r.db.WithContext(ctx).
+		Model(&model.Video{}).
+		Where("task_id = ?", taskID).
+		Where("scorer_id = ?", scorerID).
+		Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
 }
 
 func (r *Repository) FindAssignableScorers(ctx context.Context, schoolID *uuid.UUID, scorerIDs []uuid.UUID) ([]model.User, error) {

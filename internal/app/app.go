@@ -73,9 +73,9 @@ func New() (*App, error) {
 	aiRepo := ai.NewRepository(db)
 	aiService := ai.NewService(aiRepo, taskService, storageProvider, cfg.AI)
 	scoringRepo := scoring.NewRepository(db)
-	scoringService := scoring.NewService(scoringRepo, aiService, taskService, storageProvider)
 	taskScorerRepo := taskscorer.NewRepository(db)
 	taskScorerService := taskscorer.NewService(taskScorerRepo, taskService, userRepo, mailSender, cfg.Mail.InviteBaseURL)
+	scoringService := scoring.NewService(scoringRepo, aiService, taskService, storageProvider, taskScorerService)
 	videoRepo := video.NewRepository(db)
 	videoService := video.NewService(videoRepo, aiService, projectRepo, taskService, storageProvider)
 
@@ -197,6 +197,7 @@ func registerRoutes(router *gin.Engine, authService *auth.Service, userService *
 	taskGroup.POST("/:id/scorers/:scorerId/resend-invite", middleware.RequirePermission(userService, "task:update"), taskScorerHandler.Resend)
 	taskGroup.DELETE("/:id/scorers/:scorerId", middleware.RequirePermission(userService, "task:update"), taskScorerHandler.Remove)
 	taskGroup.GET("/:id/scoreboard", middleware.RequirePermission(userService, "task:read"), taskHandler.GetScoreboard)
+	taskGroup.GET("/:id/pending-assignments", middleware.RequirePermission(userService, "task:read"), scoringHandler.ListPendingAssignments)
 	taskGroup.GET("/:id/analysis", middleware.RequirePermission(userService, "task:read"), taskHandler.GetAnalysis)
 	taskGroup.POST("/:id/analysis-report", middleware.RequirePermission(userService, "task:update"), taskHandler.GenerateAnalysisReport)
 	taskGroup.GET("/:id/analysis-report", middleware.RequirePermission(userService, "task:read"), taskHandler.GetAnalysisReport)
@@ -212,6 +213,7 @@ func registerRoutes(router *gin.Engine, authService *auth.Service, userService *
 	})
 	taskGroup.POST("/:id/submit", middleware.RequirePermission(userService, "task:submit"), scoringHandler.SubmitTask)
 	taskGroup.POST("/:id/assignments", middleware.RequirePermission(userService, "task:update"), scoringHandler.AssignScorers)
+	taskGroup.POST("/:id/reassign-pending", middleware.RequirePermission(userService, "task:update"), scoringHandler.ReassignPendingVideos)
 	taskGroup.POST("/:id/ai-evaluations", middleware.RequirePermission(userService, "task:update"), aiHandler.BatchCreateForTask)
 
 	rubricGroup := api.Group("/rubrics", middleware.RequireAuth(authService))
