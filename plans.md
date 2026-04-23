@@ -238,16 +238,277 @@ AI 评估主链：
 - AI 重跑时，整体状态可从 `completed` 回退到 `in_progress`
 - `videos.completed_at` 只在整体完成时写入
 - 任务 / 项目 `completedVideos` 与整体完成态保持一致
-- 项目 / 任务返回 `allVideosCompleted`、`completionRate`
 
-## 6. 本轮新增实施范围
+## 6. 双评分员设计草案（评审版，未实施）
+
+本节不是对当前已落地单评实现的否定，而是为下一阶段“先支持双评分员，再为后续多评/仲裁预留空间”准备的最小设计草案。
+
+### 6.1 目标
+
+第一阶段目标只做双评分员：
+
+- 每个 `video` 固定分配给 2 位评分员
+- 两位评分员各自独立评分，互不覆盖
+- 两份人工评分都提交后，系统生成该视频的最终人工分
+- 学生端默认只看最终人工分，不直接暴露两位评分员原始分
+
+第一阶段暂不实现：
+
+- 仲裁
+- 三评 / 多评
+- 教师手工选择采用哪一份人工分
+- 基于分差阈值自动触发额外评审
+
+### 6.2 现状限制
+
+当前单评实现的核心约束在于：
+
+- `videos` 仅保存一个 `scorer_id`
+- `videos` 仅保存一份 `manual_score` / `manual_status`
+- 评分员任务列表与详情按 `videos.scorer_id = 当前评分员` 查询
+- 人工评分提交后直接回写 `videos.manual_score`
+
+这意味着当前实现不是“界面上只有单评”，而是数据库模型与服务逻辑都按“一视频只对应一位当前评分员”运转。
+
+### 6.3 第一阶段推荐数据模型
+
+为了先落地双评分员，同时不给后续多评彻底锁死，建议：
+
+1. 新增 `video_review_assignments`
+2. 修改 `manual_evaluations`
+3. `videos` 退回为“视频主表 + 最终汇总表”
+
+#### 6.3.1 新表：`video_review_assignments`
+
+建议字段：
+
+- `id`
+- `task_id`
+- `video_id`
+- `scorer_id`
+- `review_no`
+  - 当前阶段固定取 `1 / 2`
+- `review_type`
+  - 当前阶段固定 `normal`
+  - 为后续仲裁 / 重评预留
+- `status`
+  - `pending / in_progress / submitted / cancelled`
+- `assigned_at`
+- `started_at`
+- `submitted_at`
+- `source_assignment_id`
+  - 当前阶段可为空
+  - 未来仲裁 / 重评时可指向来源 assignment
+- `created_at`
+- `updated_at`
+
+建议约束与索引：
+
+- `unique(video_id, review_no)`
+- `unique(video_id, scorer_id, review_type)`
+- `index(scorer_id, status, assigned_at)`
+- `index(task_id, video_id)`
+- `index(video_id, status)`
+
+语义：
+
+- 一条记录表示“某个视频分给某位评分员的一次人工评审槽位”
+- 双评就是同一个 `video` 产生两条 `assignment`
+
+#### 6.3.2 旧表：`manual_evaluations`
+
+建议新增字段：
+
+- `assignment_id`
+
+建议调整：
+
+- 一条 `manual_evaluations` 对应一条 `video_review_assignments`
+- `assignment_id` 最终收敛为主关联
+- `task_id / video_id / scorer_id` 可短期保留，兼作冗余查询字段
+
+建议约束：
+
+- `unique(assignment_id)`
+
+#### 6.3.3 旧表：`videos`
+
+`videos` 不再承担“当前分配给哪位评分员”的职责，而只保留视频本身与最终汇总字段。
+
+建议保留：
+
+- `manual_score`
+  - 语义调整为“最终人工分”
+- `manual_status`
+  - 语义调整为“最终人工评分流程状态”
+- `evaluation_status`
+- `completed_at`
+
+建议新增：
+
+- `required_review_count`
+  - 当前固定 `2`
+- `submitted_review_count`
+- `score_decision_type`
+  - 当前阶段固定 `average`
+  - 为未来 `arbitration / manual_select` 预留
+
+建议后续废弃：
+
+- `videos.scorer_id`
+
+短期内可以保留兼容，但新链路不再依赖它做查询与分配。
+
+### 6.4 状态语义
+
+双评落地后，需要分清“assignment 级状态”和“video 汇总状态”。
+
+assignment 级：
+
+- `pending`
+- `in_progress`
+- `submitted`
+- `cancelled`
+
+video 汇总级：
+
+- `manual_status = pending`
+  - 0/2 完成
+- `manual_status = in_progress`
+  - 1/2 完成
+- `manual_status = submitted`
+  - 2/2 完成，且最终人工分已生成
+
+当前阶段最终人工分规则建议固定为：
+
+- 两位评分员都提交后：
+  - `videos.manual_score = (score1 + score2) / 2`
+  - `videos.submitted_review_count = 2`
+  - `videos.score_decision_type = average`
+
+### 6.5 后端接口改造建议
+
+#### 6.5.1 分配评分员
+
+现有：
+
+- `POST /api/v1/tasks/:id/assignments`
+
+当前实现是直接更新 `videos.scorer_id`。  
+双评方案下改为：为每个目标视频创建两条 `video_review_assignments`。
+
+第一阶段建议限制为显式双评：
+
+- 教师提交两个评分员
+- 同一视频不能重复分配给同一评分员
+
+#### 6.5.2 评分员任务列表
+
+现有评分员“我的任务”列表是从 `videos` 投影而来。  
+双评后应改为从 `video_review_assignments` 查询，列表主键改为 `assignment_id`。
+
+#### 6.5.3 评分员任务详情
+
+现有 scorer 详情路径虽然沿用 `/tasks/:id`，但实际语义接近“按视频查当前评分任务”。  
+双评后建议改为真正的 assignment 语义：
+
+- `GET /api/v1/scoring-assignments/:id`
+- `POST /api/v1/scoring-assignments/:id/submit`
+
+即：
+
+- 评分员看到的是“自己的某条评审 assignment”
+- 而不是抽象成“整个视频只属于自己”
+
+#### 6.5.4 教师端任务详情
+
+教师端按视频维度展示，但视频详情里需要能看到：
+
+- 评分员 A 的状态与分数
+- 评分员 B 的状态与分数
+- 最终人工分
+- 当前 0/2、1/2、2/2 的人工进度
+
+#### 6.5.5 学生端查分
+
+学生端第一阶段继续只展示：
+
+- AI 评分
+- 最终人工分
+
+不直接展示：
+
+- 两位评分员原始分
+- 双评分歧说明
+
+### 6.6 汇总逻辑
+
+建议新增统一汇总函数，例如：
+
+- `RefreshVideoManualSummary(videoID)`
+
+职责：
+
+1. 查询该视频所有有效的 `normal` 类型 assignment
+2. 统计已提交数量
+3. 若已提交数量为 `0`
+   - `videos.manual_status = pending`
+   - `videos.manual_score = null`
+4. 若已提交数量为 `1`
+   - `videos.manual_status = in_progress`
+   - `videos.manual_score = null`
+5. 若已提交数量为 `2`
+   - `videos.manual_status = submitted`
+   - `videos.manual_score = 两份人工分平均值`
+   - `videos.score_decision_type = average`
+
+后续若引入仲裁，仅扩展该汇总函数与策略判断，不必再次推翻 assignment 模型。
+
+### 6.7 迁移建议
+
+建议采用平滑迁移，不做一次性推翻：
+
+1. 新增 `video_review_assignments`
+2. 给 `manual_evaluations` 增加 `assignment_id`
+3. 把现有单评数据回填为一条 assignment
+   - `review_no = 1`
+   - `review_type = normal`
+4. 把历史 `manual_evaluations` 回填到对应 assignment
+5. 评分员列表 / 详情 / 提交链路切到 assignment 查询
+6. 教师端详情与汇总接口补齐双评字段
+7. `videos.scorer_id` 进入兼容保留期
+8. 新链路稳定后再考虑移除 `videos.scorer_id`
+
+### 6.8 实施顺序建议
+
+1. 数据库迁移与 GORM model 调整
+2. repository 层新增 assignment 查询 / 创建 / 提交能力
+3. scorer 端接口从 video 语义切到 assignment 语义
+4. 提交人工评分后调用统一视频汇总逻辑
+5. 教师端详情页改造为“双评分结果 + 最终汇总”展示
+6. 学生端保持只消费最终人工分
+7. 补充回归测试与迁移验证脚本
+
+### 6.9 当前阶段保守结论
+
+如果只是“先支持双评分员”，最稳的方案不是继续在 `videos` 上增加：
+
+- `scorer_id_1`
+- `scorer_id_2`
+- `manual_score_1`
+- `manual_score_2`
+
+而是增加一层正式的 `video_review_assignments`。  
+这样第一阶段实现双评时改动面可控，第二阶段若继续扩展三评、多评、仲裁，也不需要推翻数据库主模型。
+
+## 7. 本轮新增实施范围
 
 在完成状态口径统一后，本轮继续落地教师端最直接依赖的两块能力：
 
 1. `Task` 级完成状态提示
 2. 任务成绩汇总页与前端 Excel 导出
 
-### 6.1 Task 级完成状态提示
+### 7.1 Task 级完成状态提示
 
 目标：
 
@@ -285,7 +546,7 @@ AI 评估主链：
 - 使用 `allVideosCompleted` 控制图标高亮状态。
 - 使用 `completedVideos / totalVideos` 与 `completionRate` 展示进度。
 
-### 6.2 任务成绩汇总页与前端 Excel 导出
+### 7.2 任务成绩汇总页与前端 Excel 导出
 
 目标：
 
@@ -364,7 +625,7 @@ query 参数：
 - 前端负责基于当前查询结果直接导出 Excel。
 - 若后续单个任务学生规模显著增大，再补后端异步导出接口。
 
-### 6.3 任务成绩分析页与任务分析报告
+### 7.3 任务成绩分析页与任务分析报告
 
 目标：
 
@@ -446,7 +707,7 @@ query 参数：
   - 轮询 `GET /analysis-report`
   - 根据 `queued / processing / ready / failed` 展示提示
 
-### 6.4 本轮实施顺序
+### 7.4 本轮实施顺序
 
 1. 收敛 `plans.md` 与接口草案口径
 2. 实现 `GET /api/v1/tasks/:taskId/scoreboard`
@@ -460,7 +721,7 @@ query 参数：
 10. 实现 `GET /api/v1/tasks/:taskId/analysis-report`
 11. 运行后端测试与前端最小联调验证
 
-## 7. 当前结论
+## 8. 当前结论
 
 当前项目可以从“统一完成态”继续推进到“教师端交付最小闭环”。本轮优先落地：
 
@@ -472,9 +733,9 @@ query 参数：
 
 学生报告与批量学生报告继续放在下一轮。
 
-## 8. 并行专项：Task 评分员邀请与绑定
+## 9. 并行专项：Task 评分员邀请与绑定
 
-### 8.1 背景
+### 9.1 背景
 
 教师端新增需求要求：
 
@@ -490,7 +751,7 @@ query 参数：
 
 - [`designingDocs/task_scorer_invitation_design.md`](/Users/jason/go/src/SkillJudge/backend/designingDocs/task_scorer_invitation_design.md)
 
-### 8.2 当前状态
+### 9.2 当前状态
 
 数据库侧已完成：
 
@@ -529,7 +790,7 @@ query 参数：
 - 再分配后自动补发站内确认通知
 - 原待确认评分员在已无分配视频时自动作废原通知并停用关系
 
-### 8.3 当前收口策略
+### 9.3 当前收口策略
 
 当前实现按“账号开通”和“任务确认”两条链分开：
 
@@ -547,7 +808,7 @@ query 参数：
   3. `评分员分配详情`
 - `评分员分配详情` 打开大弹窗，不再以详情页内联面板为主入口
 
-### 8.4 当前再分配策略
+### 9.4 当前再分配策略
 
 当前实现只做保守再分配：
 
@@ -580,7 +841,7 @@ query 参数：
   - 自动创建或刷新 `task_scorers`
   - 自动生成新的站内待确认通知
 
-### 8.5 当前已具备能力
+### 9.5 当前已具备能力
 
 当前后端和前端已经具备：
 
@@ -595,7 +856,7 @@ query 参数：
 9. 教师端 `task` 列表页操作入口和分配详情弹窗
 10. `pending` 视频再分配与补通知
 
-### 8.6 后续建议
+### 9.6 后续建议
 
 1. 做真实 SMTP / 邮件模板联调和回归
 2. 若后续要放开更激进的改派，再单独设计 `in_progress` 视频回收规则
