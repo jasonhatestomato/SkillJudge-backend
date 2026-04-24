@@ -242,6 +242,11 @@ type SubmitTaskResult struct {
 	Comparison       *SubmitTaskComparisonDTO        `json:"comparison,omitempty"`
 }
 
+type SubmitSavedTaskResult struct {
+	TaskID    uuid.UUID `json:"taskId"`
+	Submitted int       `json:"submitted"`
+}
+
 func toAssignedTaskDTO(video *model.Video, scorer *model.User) AssignedTaskDTO {
 	dto := AssignedTaskDTO{
 		Video: AssignmentTaskVideoDTO{

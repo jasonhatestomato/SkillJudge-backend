@@ -16,15 +16,18 @@ type Repository struct {
 }
 
 type ListParams struct {
-	ProjectID     uuid.UUID
-	TaskID        *uuid.UUID
-	Page          int
-	PageSize      int
-	Status        string
-	StudentID     *uuid.UUID
-	ScorerID      *uuid.UUID
-	StudentNumber string
-	Keyword       string
+	ProjectID          uuid.UUID
+	TaskID             *uuid.UUID
+	Page               int
+	PageSize           int
+	Status             string
+	StudentID          *uuid.UUID
+	StudentOwnerID     *uuid.UUID
+	StudentOwnerNumber string
+	SchoolID           *uuid.UUID
+	ScorerID           *uuid.UUID
+	StudentNumber      string
+	Keyword            string
 }
 
 func NewRepository(db *gorm.DB) *Repository {
@@ -110,6 +113,22 @@ func (r *Repository) List(ctx context.Context, params ListParams) ([]model.Video
 	}
 	if params.StudentID != nil {
 		query = query.Where("student_id = ?", *params.StudentID)
+	}
+	if params.StudentOwnerID != nil || strings.TrimSpace(params.StudentOwnerNumber) != "" {
+		ownerQuery := r.db.WithContext(ctx).Where("1 = 0")
+		if params.StudentOwnerID != nil {
+			ownerQuery = ownerQuery.Or("videos.student_id = ?", *params.StudentOwnerID)
+		}
+		if strings.TrimSpace(params.StudentOwnerNumber) != "" {
+			ownerQuery = ownerQuery.Or("videos.student_number = ?", strings.TrimSpace(params.StudentOwnerNumber))
+		}
+		query = query.Where(ownerQuery)
+	}
+	if params.SchoolID != nil {
+		query = query.
+			Joins("JOIN tasks AS school_scope_tasks ON school_scope_tasks.id = videos.task_id").
+			Joins("JOIN projects AS school_scope_projects ON school_scope_projects.id = school_scope_tasks.project_id").
+			Where("school_scope_projects.school_id = ?", *params.SchoolID)
 	}
 	if params.ScorerID != nil {
 		query = query.Where("scorer_id = ?", *params.ScorerID)

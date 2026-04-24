@@ -21,6 +21,7 @@ var (
 	ErrReassignmentCountMismatch   = errors.New("quantityAssignments total must equal the selected pending video count")
 	ErrMyTasksStatusInvalid        = errors.New("status must be one of: pending, in_progress, completed, skipped")
 	ErrScoringTaskNotFound         = errors.New("scoring task not found")
+	ErrScoringTaskNoSavedDrafts    = errors.New("no saved scoring drafts found for this task")
 	ErrSubmitScoreDetailsRequired  = errors.New("scoreDetails are required")
 	ErrSubmitTotalScoreInvalid     = errors.New("totalScore must be greater than or equal to 0")
 	ErrScoringTaskCompleted        = errors.New("scoring task already completed")

@@ -97,7 +97,8 @@ func (r *Repository) FindAssignableScorers(ctx context.Context, schoolID *uuid.U
 		Joins("join roles on roles.id = user_roles.role_id and roles.status = ?", "active").
 		Where("users.id IN ?", scorerIDs).
 		Where("users.status = ?", "active").
-		Where("roles.code = ?", "scorer")
+		Where("roles.code = ?", "scorer").
+		Where("NOT (COALESCE(users.metadata ->> 'provisionedBy', '') = ? AND COALESCE(users.metadata ->> 'credentialReady', 'true') = ?)", "taskscorer", "false")
 
 	if schoolID != nil {
 		query = query.Where("users.school_id = ?", *schoolID)
@@ -118,7 +119,8 @@ func (r *Repository) ListAssignableScorers(ctx context.Context, schoolID *uuid.U
 		Joins("join user_roles on user_roles.user_id = users.id and user_roles.status = ?", "active").
 		Joins("join roles on roles.id = user_roles.role_id and roles.status = ?", "active").
 		Where("users.status = ?", "active").
-		Where("roles.code = ?", "scorer")
+		Where("roles.code = ?", "scorer").
+		Where("NOT (COALESCE(users.metadata ->> 'provisionedBy', '') = ? AND COALESCE(users.metadata ->> 'credentialReady', 'true') = ?)", "taskscorer", "false")
 
 	if schoolID != nil {
 		query = query.Where("users.school_id = ?", *schoolID)
@@ -206,6 +208,30 @@ func (r *Repository) FindAssignedVideoDetail(ctx context.Context, videoID, score
 	return &item, nil
 }
 
+func (r *Repository) ListSavedDraftVideosByTask(ctx context.Context, taskID, scorerID uuid.UUID) ([]model.Video, error) {
+	var items []model.Video
+	err := r.db.WithContext(ctx).
+		Model(&model.Video{}).
+		Select("DISTINCT videos.*").
+		Preload("Task").
+		Preload("Task.Project").
+		Preload("Task.Project.School").
+		Preload("Task.Rubric").
+		Preload("Scorer").
+		Joins("JOIN task_scorers ON task_scorers.task_id = videos.task_id AND task_scorers.scorer_id = videos.scorer_id AND task_scorers.status = ?", "accepted").
+		Joins("JOIN manual_evaluations ON manual_evaluations.video_id = videos.id AND manual_evaluations.scorer_id = videos.scorer_id AND manual_evaluations.status = ?", ManualEvaluationStatusInProgress).
+		Where("videos.task_id = ?", taskID).
+		Where("videos.scorer_id = ?", scorerID).
+		Where("videos.manual_status = ?", evaluation.ManualStatusInProgress).
+		Order("videos.assigned_at DESC NULLS LAST, videos.created_at DESC").
+		Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
 func (r *Repository) FindLatestManualEvaluation(ctx context.Context, videoID, scorerID uuid.UUID) (*model.ManualEvaluation, error) {
 	var item model.ManualEvaluation
 	err := r.db.WithContext(ctx).
@@ -222,6 +248,83 @@ func (r *Repository) FindLatestManualEvaluation(ctx context.Context, videoID, sc
 	}
 
 	return &item, nil
+}
+
+func (r *Repository) SaveManualEvaluationDraft(ctx context.Context, video *model.Video, input SubmitTaskInput, savedAt time.Time) (*model.ManualEvaluation, error) {
+	var manualEval model.ManualEvaluation
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		err := tx.
+			Model(&model.ManualEvaluation{}).
+			Where("video_id = ?", video.ID).
+			Where("scorer_id = ?", *video.ScorerID).
+			Order("submitted_at DESC NULLS LAST, updated_at DESC").
+			First(&manualEval).Error
+
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			manualEval = model.ManualEvaluation{
+				TaskID:       *video.TaskID,
+				VideoID:      video.ID,
+				ScorerID:     *video.ScorerID,
+				RubricID:     rubricIDFromVideo(video),
+				TotalScore:   &input.TotalScore,
+				ScoreDetails: input.ScoreDetails,
+				Comments:     input.Comments,
+				Status:       ManualEvaluationStatusInProgress,
+				StartedAt:    startedAtFromVideo(video, savedAt),
+			}
+			if err := tx.Create(&manualEval).Error; err != nil {
+				return err
+			}
+		case err != nil:
+			return err
+		default:
+			startedAt := manualEval.StartedAt
+			if startedAt == nil {
+				startedAt = startedAtFromVideo(video, savedAt)
+			}
+			updates := map[string]any{
+				"rubric_id":     rubricIDFromVideo(video),
+				"total_score":   input.TotalScore,
+				"score_details": input.ScoreDetails,
+				"comments":      input.Comments,
+				"status":        ManualEvaluationStatusInProgress,
+				"started_at":    startedAt,
+				"submitted_at":  nil,
+				"updated_at":    savedAt,
+			}
+			if err := tx.Model(&model.ManualEvaluation{}).Where("id = ?", manualEval.ID).Updates(updates).Error; err != nil {
+				return err
+			}
+			manualEval.TotalScore = &input.TotalScore
+			manualEval.ScoreDetails = input.ScoreDetails
+			manualEval.Comments = input.Comments
+			manualEval.Status = ManualEvaluationStatusInProgress
+			manualEval.StartedAt = startedAt
+			manualEval.SubmittedAt = nil
+			manualEval.UpdatedAt = savedAt
+		}
+
+		overallStatus := evaluation.ResolveOverallStatus(evaluation.ManualStatusInProgress, video.AIStatus)
+		videoUpdates := map[string]any{
+			"manual_score":      input.TotalScore,
+			"manual_status":     evaluation.ManualStatusInProgress,
+			"evaluation_status": overallStatus,
+			"completed_at":      nil,
+			"updated_at":        savedAt,
+		}
+		if err := tx.Model(&model.Video{}).Where("id = ?", video.ID).Updates(videoUpdates).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &manualEval, nil
 }
 
 func (r *Repository) SubmitManualEvaluation(ctx context.Context, video *model.Video, input SubmitTaskInput, submittedAt time.Time) (*model.ManualEvaluation, error) {
@@ -300,6 +403,58 @@ func (r *Repository) SubmitManualEvaluation(ctx context.Context, video *model.Vi
 	}
 
 	return &manualEval, nil
+}
+
+func (r *Repository) SubmitSavedDrafts(ctx context.Context, videos []model.Video, submittedAt time.Time) (int, error) {
+	if len(videos) == 0 {
+		return 0, nil
+	}
+
+	submittedCount := 0
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, video := range videos {
+			if video.ScorerID == nil {
+				continue
+			}
+
+			manualUpdates := map[string]any{
+				"status":       ManualEvaluationStatusSubmitted,
+				"submitted_at": submittedAt,
+				"updated_at":   submittedAt,
+			}
+			result := tx.Model(&model.ManualEvaluation{}).
+				Where("video_id = ?", video.ID).
+				Where("scorer_id = ?", *video.ScorerID).
+				Where("status = ?", ManualEvaluationStatusInProgress).
+				Updates(manualUpdates)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				continue
+			}
+
+			overallStatus := evaluation.ResolveOverallStatus(evaluation.ManualStatusSubmitted, video.AIStatus)
+			videoUpdates := map[string]any{
+				"manual_status":     evaluation.ManualStatusSubmitted,
+				"evaluation_status": overallStatus,
+				"completed_at":      evaluation.ResolveCompletedAt(overallStatus, submittedAt),
+				"updated_at":        submittedAt,
+			}
+			if err := tx.Model(&model.Video{}).Where("id = ?", video.ID).Updates(videoUpdates).Error; err != nil {
+				return err
+			}
+
+			submittedCount += 1
+		}
+
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return submittedCount, nil
 }
 
 func rubricIDFromVideo(video *model.Video) *uuid.UUID {

@@ -1,5 +1,10 @@
 __pycache__/
 *.pyc
+.DS_Store
+.env
+.gocache/
+.gocache_test/
+*.db
 
 tools/__pycache__/
 tools/

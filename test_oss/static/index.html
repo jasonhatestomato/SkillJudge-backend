@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <title>分片上传测试</title>
+  <style>
+    body { font-family: sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+    h1   { font-size: 1.4rem; }
+    #dropzone {
+      border: 2px dashed #aaa; border-radius: 8px;
+      padding: 32px; text-align: center; color: #888; cursor: pointer;
+      transition: border-color .2s;
+    }
+    #dropzone.over { border-color: #4f8; color: #333; }
+    #file-info     { margin: 12px 0; font-size: .9rem; color: #555; }
+    progress       { width: 100%; height: 20px; margin: 8px 0; }
+    #status        { font-size: .9rem; white-space: pre-wrap; background: #f5f5f5;
+                     padding: 10px; border-radius: 6px; min-height: 60px; }
+    button         { padding: 8px 20px; margin-top: 8px; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    a              { word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>视频分片上传测试</h1>
+
+  <div id="dropzone">拖拽文件到此处，或点击选择文件
+    <input type="file" id="file-input" style="display:none" accept="video/*,*/*" />
+  </div>
+
+  <div id="file-info">未选择文件</div>
+
+  <progress id="progress" value="0" max="100"></progress>
+  <div>进度：<span id="pct">0</span>%</div>
+
+  <button id="btn-upload" disabled>开始上传</button>
+  <button id="btn-abort"  disabled>中止上传</button>
+
+  <h3>日志</h3>
+  <pre id="status">等待操作…</pre>
+
+  <script>
+  (() => {
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB — OBS minimum part size
+
+    let selectedFile = null;
+    let aborted = false;
+
+    const dropzone   = document.getElementById('dropzone');
+    const fileInput  = document.getElementById('file-input');
+    const fileInfo   = document.getElementById('file-info');
+    const progress   = document.getElementById('progress');
+    const pct        = document.getElementById('pct');
+    const btnUpload  = document.getElementById('btn-upload');
+    const btnAbort   = document.getElementById('btn-abort');
+    const status     = document.getElementById('status');
+
+    // ---- file selection ----
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('over'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('over'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault(); dropzone.classList.remove('over');
+      setFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', () => setFile(fileInput.files[0]));
+
+    function setFile(f) {
+      if (!f) return;
+      selectedFile = f;
+      const mb = (f.size / 1024 / 1024).toFixed(2);
+      fileInfo.textContent = `${f.name}  (${mb} MB)`;
+      btnUpload.disabled = false;
+      log(`已选择文件: ${f.name}, 大小: ${mb} MB`);
+    }
+
+    // ---- upload ----
+    btnUpload.addEventListener('click', startUpload);
+    btnAbort.addEventListener('click', () => { aborted = true; log('用户中止上传'); });
+
+    async function startUpload() {
+      if (!selectedFile) return;
+      aborted = false;
+      btnUpload.disabled = true;
+      btnAbort.disabled  = false;
+      setProgress(0);
+
+      const totalChunks = Math.ceil(selectedFile.size / CHUNK_SIZE);
+      log(`文件将被分为 ${totalChunks} 个分片（每片 ${CHUNK_SIZE/1024/1024} MB）`);
+
+      // 1. Init
+      log('初始化上传…');
+      let initRes;
+      try {
+        initRes = await post('/api/upload/init', {
+          filename:     selectedFile.name,
+          filesize:     selectedFile.size,
+          total_chunks: totalChunks,
+        });
+      } catch (e) {
+        log('初始化失败: ' + e.message);
+        btnUpload.disabled = false;
+        btnAbort.disabled  = true;
+        return;
+      }
+      log(`file_id: ${initRes.file_id}\nOBS upload_id: ${initRes.upload_id}`);
+
+      // 2. Upload chunks
+      for (let i = 1; i <= totalChunks; i++) {
+        if (aborted) { log('上传已中止'); break; }
+
+        const start = (i - 1) * CHUNK_SIZE;
+        const end   = Math.min(start + CHUNK_SIZE, selectedFile.size);
+        const blob  = selectedFile.slice(start, end);
+
+        log(`上传分片 ${i}/${totalChunks} (${((end-start)/1024).toFixed(1)} KB)…`);
+
+        const form = new FormData();
+        form.append('file_id',     initRes.file_id);
+        form.append('chunk_index', String(i));
+        form.append('chunk',       blob, selectedFile.name);
+
+        try {
+          const res = await fetch('/api/upload/chunk', { method: 'POST', body: form });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: res.statusText }));
+            throw new Error(err.error || res.statusText);
+          }
+          const data = await res.json();
+          log(`  ✓ ETag: ${data.etag}`);
+          setProgress(Math.round(i / totalChunks * 100));
+        } catch (e) {
+          log(`分片 ${i} 上传失败: ${e.message}`);
+          btnUpload.disabled = false;
+          btnAbort.disabled  = true;
+          return;
+        }
+      }
+
+      if (aborted) {
+        btnUpload.disabled = false;
+        btnAbort.disabled  = true;
+        return;
+      }
+
+      // 3. Complete
+      log('合并分片…');
+      try {
+        const completeRes = await post('/api/upload/complete', { file_id: initRes.file_id });
+        setProgress(100);
+        log(`上传成功！\n文件名: ${completeRes.filename}\nOSS URL: ${completeRes.url}`);
+        // Show clickable link
+        status.innerHTML += `\n<a href="${completeRes.url}" target="_blank">${completeRes.url}</a>`;
+      } catch (e) {
+        log('合并失败: ' + e.message);
+      }
+
+      btnUpload.disabled = false;
+      btnAbort.disabled  = true;
+    }
+
+    // ---- helpers ----
+    async function post(url, body) {
+      const res = await fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(err.error || res.statusText);
+      }
+      return res.json();
+    }
+
+    function setProgress(v) {
+      progress.value = v;
+      pct.textContent = v;
+    }
+
+    function log(msg) {
+      const ts = new Date().toLocaleTimeString();
+      status.textContent += `[${ts}] ${msg}\n`;
+      status.scrollTop = status.scrollHeight;
+    }
+  })();
+  </script>
+</body>
+</html>

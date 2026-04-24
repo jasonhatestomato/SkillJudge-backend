@@ -7,22 +7,23 @@ import (
 )
 
 type User struct {
-	ID           uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	Username     string     `gorm:"size:50;uniqueIndex;not null"`
-	PasswordHash string     `gorm:"size:255;not null"`
-	Email        *string    `gorm:"size:100"`
-	Phone        *string    `gorm:"size:20"`
-	RealName     *string    `gorm:"size:50"`
-	AvatarURL    *string    `gorm:"size:500"`
-	Role         string     `gorm:"size:20;not null;index"`
-	Status       string     `gorm:"size:20;default:active;index"`
-	SchoolID     *uuid.UUID `gorm:"type:uuid;index"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	LastLoginAt  *time.Time
-	Metadata     map[string]any `gorm:"type:jsonb;serializer:json"`
-	School       *School
-	UserRoles    []UserRole
+	ID             uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	Username       string     `gorm:"size:50;uniqueIndex;not null"`
+	PasswordHash   string     `gorm:"size:255;not null"`
+	Email          *string    `gorm:"size:100"`
+	Phone          *string    `gorm:"size:20"`
+	RealName       *string    `gorm:"size:50"`
+	InternalNumber *string    `gorm:"size:50;index"`
+	AvatarURL      *string    `gorm:"size:500"`
+	Role           string     `gorm:"size:20;not null;index"`
+	Status         string     `gorm:"size:20;default:active;index"`
+	SchoolID       *uuid.UUID `gorm:"type:uuid;index"`
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	LastLoginAt    *time.Time
+	Metadata       map[string]any `gorm:"type:jsonb;serializer:json"`
+	School         *School
+	UserRoles      []UserRole
 }
 
 func (User) TableName() string {

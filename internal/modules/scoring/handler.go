@@ -43,6 +43,12 @@ type submitTaskRequest struct {
 	Comments     *string          `json:"comments"`
 }
 
+type saveTaskDraftRequest struct {
+	ScoreDetails []map[string]any `json:"scoreDetails"`
+	TotalScore   float64          `json:"totalScore"`
+	Comments     *string          `json:"comments"`
+}
+
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
@@ -98,6 +104,64 @@ func (h *Handler) SubmitTask(c *gin.Context) {
 			response.Error(c, http.StatusConflict, err.Error(), nil)
 		default:
 			response.Error(c, http.StatusInternalServerError, "failed to submit scoring task", nil)
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, result)
+}
+
+func (h *Handler) SaveTaskDraft(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid task id", nil)
+		return
+	}
+
+	var req saveTaskDraftRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid request payload", nil)
+		return
+	}
+
+	result, err := h.service.SaveTaskDraft(c.Request.Context(), actor, id, SubmitTaskInput{
+		ScoreDetails: req.ScoreDetails,
+		TotalScore:   req.TotalScore,
+		Comments:     req.Comments,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrSubmitTotalScoreInvalid):
+			response.Error(c, http.StatusBadRequest, err.Error(), nil)
+		case errors.Is(err, ErrScoringTaskNotFound):
+			response.Error(c, http.StatusNotFound, err.Error(), nil)
+		case errors.Is(err, ErrScoringTaskCompleted):
+			response.Error(c, http.StatusConflict, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to save scoring draft", nil)
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, result)
+}
+
+func (h *Handler) SubmitSavedTask(c *gin.Context) {
+	actor := middleware.CurrentUser(c)
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid task id", nil)
+		return
+	}
+
+	result, err := h.service.SubmitSavedTask(c.Request.Context(), actor, id)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrScoringTaskNoSavedDrafts):
+			response.Error(c, http.StatusConflict, err.Error(), nil)
+		default:
+			response.Error(c, http.StatusInternalServerError, "failed to submit saved scoring drafts", nil)
 		}
 		return
 	}

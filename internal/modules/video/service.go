@@ -27,6 +27,7 @@ type Service struct {
 	aiService   *ai.Service
 	projectRepo *project.Repository
 	taskService *task.Service
+	users       *user.Repository
 	storage     storage.Provider
 }
 
@@ -46,12 +47,13 @@ type ConfirmUploadInput struct {
 
 var filenameStudentIDPattern = regexp.MustCompile(`^(.*)_([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`)
 
-func NewService(repo *Repository, aiService *ai.Service, projectRepo *project.Repository, taskService *task.Service, provider storage.Provider) *Service {
+func NewService(repo *Repository, aiService *ai.Service, projectRepo *project.Repository, taskService *task.Service, users *user.Repository, provider storage.Provider) *Service {
 	return &Service{
 		repo:        repo,
 		aiService:   aiService,
 		projectRepo: projectRepo,
 		taskService: taskService,
+		users:       users,
 		storage:     provider,
 	}
 }
@@ -258,7 +260,19 @@ func (s *Service) ListMine(ctx context.Context, actor user.UserContext, params L
 		params.PageSize = 20
 	}
 
-	params.StudentID = &actor.UserID
+	currentUser, err := s.users.FindByID(ctx, actor.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if currentUser == nil {
+		return nil, user.ErrUserNotFound
+	}
+
+	params.StudentOwnerID = &actor.UserID
+	if currentUser.InternalNumber != nil && strings.TrimSpace(*currentUser.InternalNumber) != "" {
+		params.StudentOwnerNumber = strings.TrimSpace(*currentUser.InternalNumber)
+	}
+	params.SchoolID = actor.SchoolID
 	params.TaskID = nil
 	params.ProjectID = uuid.Nil
 
@@ -325,7 +339,14 @@ func (s *Service) GetMineByID(ctx context.Context, actor user.UserContext, video
 	if item == nil {
 		return nil, ErrVideoNotFound
 	}
-	if item.StudentID == nil || *item.StudentID != actor.UserID {
+	currentUser, err := s.users.FindByID(ctx, actor.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if currentUser == nil {
+		return nil, user.ErrUserNotFound
+	}
+	if !studentCanAccessVideo(actor, currentUser, item) {
 		return nil, ErrInvalidVideoScope
 	}
 
@@ -345,6 +366,21 @@ func (s *Service) GetMineByID(ctx context.Context, actor user.UserContext, video
 	}
 
 	return ToVideoDetailDTO(item, playURL, manual, aiEvaluation), nil
+}
+
+func studentCanAccessVideo(actor user.UserContext, currentUser *model.User, item *model.Video) bool {
+	if item.StudentID != nil && *item.StudentID == actor.UserID {
+		return true
+	}
+	if currentUser == nil || currentUser.InternalNumber == nil {
+		return false
+	}
+	internalNumber := strings.TrimSpace(*currentUser.InternalNumber)
+	if internalNumber == "" || strings.TrimSpace(item.StudentNumber) != internalNumber {
+		return false
+	}
+	videoSchool := videoSchoolID(item)
+	return actor.SchoolID != nil && videoSchool != nil && *actor.SchoolID == *videoSchool
 }
 
 func (s *Service) Delete(ctx context.Context, actor user.UserContext, videoID uuid.UUID) error {
@@ -444,6 +480,14 @@ func resolveStudentIdentity(input CreateUploadCredentialInput) (*uuid.UUID, stri
 			}
 		}
 	}
+	if parsedName, parsedNumber, ok := parseStudentNameNumberFromTitle(filenameTitle); ok {
+		if studentName == "" || studentName == filenameTitle {
+			studentName = parsedName
+		}
+		if studentNumber == "" || studentNumber == filenameTitle || studentNumber == studentName || isTemporaryStudentNumber(studentNumber) {
+			studentNumber = parsedNumber
+		}
+	}
 
 	if studentName == "" {
 		studentName = filenameTitle
@@ -472,6 +516,31 @@ func parseStudentIdentityFromTitle(title string) (string, uuid.UUID, bool) {
 	}
 
 	return studentName, studentID, true
+}
+
+func parseStudentNameNumberFromTitle(title string) (string, string, bool) {
+	trimmed := strings.TrimSpace(title)
+	matches := filenameStudentIDPattern.FindStringSubmatch(trimmed)
+	if len(matches) == 3 {
+		return "", "", false
+	}
+
+	separatorIndex := strings.LastIndex(trimmed, "_")
+	if separatorIndex <= 0 || separatorIndex >= len(trimmed)-1 {
+		return "", "", false
+	}
+
+	studentName := strings.TrimSpace(trimmed[:separatorIndex])
+	studentNumber := strings.TrimSpace(trimmed[separatorIndex+1:])
+	if studentName == "" || studentNumber == "" {
+		return "", "", false
+	}
+
+	return studentName, studentNumber, true
+}
+
+func isTemporaryStudentNumber(value string) bool {
+	return strings.HasPrefix(strings.TrimSpace(value), "tmp-")
 }
 
 func (s *Service) latestAIEvaluation(ctx context.Context, videoID uuid.UUID) (*ai.EmbeddedEvaluationDTO, error) {

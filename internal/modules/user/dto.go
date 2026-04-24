@@ -25,15 +25,16 @@ type AuditInput struct {
 }
 
 type UserDTO struct {
-	ID          uuid.UUID  `json:"id"`
-	Username    string     `json:"username"`
-	Email       *string    `json:"email,omitempty"`
-	Phone       *string    `json:"phone,omitempty"`
-	RealName    *string    `json:"realName,omitempty"`
-	Role        string     `json:"role"`
-	Status      string     `json:"status"`
-	Permissions []string   `json:"permissions,omitempty"`
-	School      *SchoolDTO `json:"school,omitempty"`
+	ID             uuid.UUID  `json:"id"`
+	Username       string     `json:"username"`
+	Email          *string    `json:"email,omitempty"`
+	Phone          *string    `json:"phone,omitempty"`
+	RealName       *string    `json:"realName,omitempty"`
+	InternalNumber *string    `json:"internalNumber,omitempty"`
+	Role           string     `json:"role"`
+	Status         string     `json:"status"`
+	Permissions    []string   `json:"permissions,omitempty"`
+	School         *SchoolDTO `json:"school,omitempty"`
 }
 
 type SchoolDTO struct {
@@ -56,14 +57,15 @@ type BatchCreateUsersResult struct {
 
 func ToUserDTO(user *model.User, permissions []string) *UserDTO {
 	dto := &UserDTO{
-		ID:          user.ID,
-		Username:    user.Username,
-		Email:       user.Email,
-		Phone:       user.Phone,
-		RealName:    user.RealName,
-		Role:        user.Role,
-		Status:      user.Status,
-		Permissions: permissions,
+		ID:             user.ID,
+		Username:       user.Username,
+		Email:          user.Email,
+		Phone:          user.Phone,
+		RealName:       user.RealName,
+		InternalNumber: user.InternalNumber,
+		Role:           user.Role,
+		Status:         user.Status,
+		Permissions:    permissions,
 	}
 
 	if user.School != nil {

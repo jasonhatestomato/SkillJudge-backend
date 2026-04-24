@@ -27,6 +27,16 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+func (r *Repository) Transaction(ctx context.Context, fn func(*Repository) error) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(NewRepository(tx))
+	})
+}
+
+func (r *Repository) DB() *gorm.DB {
+	return r.db
+}
+
 func (r *Repository) ListTaskScorers(ctx context.Context, taskID uuid.UUID) ([]model.TaskScorer, error) {
 	var items []model.TaskScorer
 	err := r.db.WithContext(ctx).

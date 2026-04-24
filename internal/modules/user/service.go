@@ -21,30 +21,33 @@ type Service struct {
 var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,50}$`)
 
 type CreateUserInput struct {
-	Username string
-	Password string
-	Email    *string
-	RealName *string
-	Phone    *string
-	Role     string
-	SchoolID *uuid.UUID
+	Username       string
+	Password       string
+	Email          *string
+	RealName       *string
+	Phone          *string
+	InternalNumber *string
+	Role           string
+	SchoolID       *uuid.UUID
 }
 
 type BatchCreateUserInput struct {
-	Row      *int
-	Username string
-	Password string
-	Email    *string
-	RealName *string
-	Phone    *string
-	Role     string
-	SchoolID *string
+	Row            *int
+	Username       string
+	Password       string
+	Email          *string
+	RealName       *string
+	Phone          *string
+	InternalNumber *string
+	Role           string
+	SchoolID       *string
 }
 
 type UpdateProfileInput struct {
-	Email    *string `json:"email"`
-	RealName *string `json:"realName"`
-	Phone    *string `json:"phone"`
+	Email          *string `json:"email"`
+	RealName       *string `json:"realName"`
+	Phone          *string `json:"phone"`
+	InternalNumber *string `json:"internalNumber"`
 }
 
 type UpdateManagedUserInput struct {
@@ -151,14 +154,15 @@ func (s *Service) createOne(ctx context.Context, actor UserContext, input Create
 	}
 
 	user := &model.User{
-		Username:     input.Username,
-		PasswordHash: string(hash),
-		Email:        input.Email,
-		Phone:        input.Phone,
-		RealName:     input.RealName,
-		Role:         input.Role,
-		Status:       "active",
-		SchoolID:     input.SchoolID,
+		Username:       input.Username,
+		PasswordHash:   string(hash),
+		Email:          input.Email,
+		Phone:          input.Phone,
+		RealName:       input.RealName,
+		InternalNumber: input.InternalNumber,
+		Role:           input.Role,
+		Status:         "active",
+		SchoolID:       input.SchoolID,
 	}
 
 	if actor.Role == "school_admin" || actor.Role == "school_leader" {
@@ -209,7 +213,7 @@ func (s *Service) GetMe(ctx context.Context, userID uuid.UUID) (*UserDTO, error)
 }
 
 func (s *Service) UpdateMe(ctx context.Context, userID uuid.UUID, input UpdateProfileInput) (*UserDTO, error) {
-	if input.Email == nil && input.RealName == nil && input.Phone == nil {
+	if input.Email == nil && input.RealName == nil && input.Phone == nil && input.InternalNumber == nil {
 		return nil, ErrEmptyUpdatePayload
 	}
 	updates := map[string]any{
@@ -223,6 +227,9 @@ func (s *Service) UpdateMe(ctx context.Context, userID uuid.UUID, input UpdatePr
 	}
 	if input.Phone != nil {
 		updates["phone"] = *input.Phone
+	}
+	if input.InternalNumber != nil {
+		updates["internal_number"] = *input.InternalNumber
 	}
 
 	if err := s.repo.UpdateProfile(ctx, userID, updates); err != nil {
@@ -408,12 +415,13 @@ func validateCreateUserInput(input CreateUserInput) error {
 
 func (input BatchCreateUserInput) toCreateUserInput() (CreateUserInput, error) {
 	result := CreateUserInput{
-		Username: input.Username,
-		Password: input.Password,
-		Email:    input.Email,
-		RealName: input.RealName,
-		Phone:    input.Phone,
-		Role:     input.Role,
+		Username:       input.Username,
+		Password:       input.Password,
+		Email:          input.Email,
+		RealName:       input.RealName,
+		Phone:          input.Phone,
+		InternalNumber: input.InternalNumber,
+		Role:           input.Role,
 	}
 
 	if input.SchoolID == nil || *input.SchoolID == "" {

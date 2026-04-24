@@ -77,7 +77,7 @@ func New() (*App, error) {
 	taskScorerService := taskscorer.NewService(taskScorerRepo, taskService, userRepo, mailSender, cfg.Mail.InviteBaseURL)
 	scoringService := scoring.NewService(scoringRepo, aiService, taskService, storageProvider, taskScorerService)
 	videoRepo := video.NewRepository(db)
-	videoService := video.NewService(videoRepo, aiService, projectRepo, taskService, storageProvider)
+	videoService := video.NewService(videoRepo, aiService, projectRepo, taskService, userRepo, storageProvider)
 
 	jwtManager := platformjwt.NewManager(cfg.JWT.Issuer, cfg.JWT.Secret)
 	sessionStore := auth.NewSessionStore(redisClient)
@@ -211,6 +211,8 @@ func registerRoutes(router *gin.Engine, authService *auth.Service, userService *
 		}
 		taskHandler.Get(c)
 	})
+	taskGroup.POST("/:id/save-draft", middleware.RequirePermission(userService, "task:submit"), scoringHandler.SaveTaskDraft)
+	taskGroup.POST("/:id/submit-saved", middleware.RequirePermission(userService, "task:submit"), scoringHandler.SubmitSavedTask)
 	taskGroup.POST("/:id/submit", middleware.RequirePermission(userService, "task:submit"), scoringHandler.SubmitTask)
 	taskGroup.POST("/:id/assignments", middleware.RequirePermission(userService, "task:update"), scoringHandler.AssignScorers)
 	taskGroup.POST("/:id/reassign-pending", middleware.RequirePermission(userService, "task:update"), scoringHandler.ReassignPendingVideos)

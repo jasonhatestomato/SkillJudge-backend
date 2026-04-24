@@ -188,7 +188,7 @@ func (r *Repository) List(ctx context.Context, params ListParams, actorRole stri
 
 	if params.Keyword != "" {
 		keyword := "%" + strings.TrimSpace(params.Keyword) + "%"
-		query = query.Where("users.username ILIKE ? OR users.real_name ILIKE ?", keyword, keyword)
+		query = query.Where("users.username ILIKE ? OR users.real_name ILIKE ? OR users.internal_number ILIKE ?", keyword, keyword, keyword)
 	}
 
 	if (actorRole == "school_admin" || actorRole == "school_leader") && actorSchoolID != nil {

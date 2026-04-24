@@ -130,6 +130,64 @@ func (s *Service) GetTaskDetail(ctx context.Context, actor user.UserContext, id 
 	return toScoringTaskDetailDTO(item, manualEvaluation, aiEvaluation, playURL), nil
 }
 
+func (s *Service) SaveTaskDraft(ctx context.Context, actor user.UserContext, id uuid.UUID, input SubmitTaskInput) (*SubmitTaskResult, error) {
+	if input.TotalScore < 0 {
+		return nil, ErrSubmitTotalScoreInvalid
+	}
+
+	item, err := s.repo.FindAssignedVideoDetail(ctx, id, actor.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil || item.ScorerID == nil || item.TaskID == nil {
+		return nil, ErrScoringTaskNotFound
+	}
+	if item.EvaluationStatus == VideoEvaluationStatusCompleted || item.ManualStatus == VideoManualStatusSubmitted {
+		return nil, ErrScoringTaskCompleted
+	}
+
+	now := time.Now()
+	manual, err := s.repo.SaveManualEvaluationDraft(ctx, item, input, now)
+	if err != nil {
+		return nil, err
+	}
+
+	item.ManualScore = &input.TotalScore
+	item.ManualStatus = evaluation.ManualStatusInProgress
+	item.EvaluationStatus = evaluation.ResolveOverallStatus(item.ManualStatus, item.AIStatus)
+	item.CompletedAt = nil
+
+	return toSubmitTaskResult(item, manual), nil
+}
+
+func (s *Service) SubmitSavedTask(ctx context.Context, actor user.UserContext, taskID uuid.UUID) (*SubmitSavedTaskResult, error) {
+	drafts, err := s.repo.ListSavedDraftVideosByTask(ctx, taskID, actor.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if len(drafts) == 0 {
+		return nil, ErrScoringTaskNoSavedDrafts
+	}
+
+	now := time.Now()
+	submittedCount, err := s.repo.SubmitSavedDrafts(ctx, drafts, now)
+	if err != nil {
+		return nil, err
+	}
+	if submittedCount == 0 {
+		return nil, ErrScoringTaskNoSavedDrafts
+	}
+
+	if err := s.taskService.RefreshVideoStats(ctx, taskID); err != nil {
+		return nil, err
+	}
+
+	return &SubmitSavedTaskResult{
+		TaskID:    taskID,
+		Submitted: submittedCount,
+	}, nil
+}
+
 func (s *Service) SubmitTask(ctx context.Context, actor user.UserContext, id uuid.UUID, input SubmitTaskInput) (*SubmitTaskResult, error) {
 	if len(input.ScoreDetails) == 0 {
 		return nil, ErrSubmitScoreDetailsRequired

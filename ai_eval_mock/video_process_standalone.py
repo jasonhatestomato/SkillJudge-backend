@@ -10,10 +10,10 @@ from video_preprocessor import VideoPreprocessor
 
 
 # 直接修改这里即可指定要处理的视频。
-VIDEO_PATH = "/Users/jason/go/src/SkillJudge/backend/demo_data/0957_device7.MP4"
+VIDEO_PATH = "/Users/jason/go/src/SkillJudge/backend/demo_data/test417/data2/张同学_5128590.MP4"
 
 # 留空时默认输出到源文件同目录下的 processed.mp4。
-OUTPUT_PATH = "/Users/jason/go/src/SkillJudge/backend/demo_data/0957_device7.MP4_processed-4.mp4"
+OUTPUT_PATH = "/Users/jason/go/src/SkillJudge/backend/demo_data/test417/data2/张同学_5128590_processed-4.mp4"
 
 # 留空表示沿用 .env / Settings 配置；填写数字则覆盖对应配置。
 OVERRIDE_FPS: int | None = 8

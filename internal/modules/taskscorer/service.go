@@ -203,23 +203,41 @@ func (s *Service) Provision(ctx context.Context, actor user.UserContext, input I
 	if err != nil {
 		return nil, err
 	}
-	if existingScorer == nil {
+	if existingScorer == nil || userCredentialPendingDelivery(existingScorer) {
 		if err := s.ensureMailAvailable(); err != nil {
 			return nil, err
 		}
 	}
 
-	scorerUser, userCreated, temporaryPassword, err := s.findOrCreateScorer(ctx, actor, *actor.SchoolID, name, email)
-	if err != nil {
-		return nil, err
-	}
-
+	var scorerUser *model.User
+	var userCreated bool
 	emailSent := false
-	if userCreated {
-		if err := s.sendProvisionEmail(ctx, scorerUser, temporaryPassword); err != nil {
-			return nil, err
+	if err := s.repo.Transaction(ctx, func(txRepo *Repository) error {
+		txService := *s
+		txService.repo = txRepo
+		txService.users = user.NewRepository(txRepo.DB())
+
+		var temporaryPassword *string
+		var err error
+		scorerUser, userCreated, temporaryPassword, err = txService.findOrCreateScorer(ctx, actor, *actor.SchoolID, name, email)
+		if err != nil {
+			return err
 		}
-		emailSent = true
+		if !userCreated && userCredentialPendingDelivery(scorerUser) {
+			temporaryPassword, err = txService.rotateCredentialForPendingDelivery(ctx, scorerUser)
+			if err != nil {
+				return err
+			}
+		}
+		if temporaryPassword != nil {
+			if err := txService.sendProvisionEmail(ctx, scorerUser, temporaryPassword); err != nil {
+				return err
+			}
+			emailSent = true
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return &ProvisionTaskScorerResult{
@@ -254,61 +272,84 @@ func (s *Service) Invite(ctx context.Context, actor user.UserContext, taskID uui
 	if err != nil {
 		return nil, err
 	}
-	if existingScorer == nil {
+	if existingScorer == nil || userCredentialPendingDelivery(existingScorer) {
 		if err := s.ensureMailAvailable(); err != nil {
 			return nil, err
 		}
 	}
 
-	scorerUser, userCreated, temporaryPassword, err := s.findOrCreateScorer(ctx, actor, *resolvedTask.SchoolID, name, email)
-	if err != nil {
-		return nil, err
-	}
-
-	taskScorer, relationCreated, err := s.findOrCreateTaskScorer(ctx, actor, resolvedTask.TaskID, scorerUser.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	now := time.Now()
-	rawToken, tokenHash, err := newInvitationToken()
-	if err != nil {
-		return nil, err
-	}
+	var scorerUser *model.User
+	var userCreated bool
+	var relationCreated bool
+	var taskScorer *model.TaskScorer
+	var invitation *model.TaskScorerInvitation
 	deliveryMode := deliveryModeInApp
-	if userCreated {
-		deliveryMode = deliveryModeEmailAndInApp
-	}
+	if err := s.repo.Transaction(ctx, func(txRepo *Repository) error {
+		txService := *s
+		txService.repo = txRepo
+		txService.users = user.NewRepository(txRepo.DB())
 
-	invitation := &model.TaskScorerInvitation{
-		TaskID:           resolvedTask.TaskID,
-		ScorerID:         scorerUser.ID,
-		EmailSnapshot:    email,
-		RealNameSnapshot: stringPtr(name),
-		TokenHash:        tokenHash,
-		Status:           "sent",
-		SentAt:           now,
-		ExpiresAt:        now.Add(invitationTTL),
-		CreatedBy:        &actor.UserID,
-		Metadata: map[string]any{
-			"mailPending":   userCreated,
-			"deliveryMode":  deliveryMode,
-			"inAppRead":     false,
-			"inAppReadAt":   nil,
-			"createdByFlow": "teacher_invite",
-		},
-	}
-	if err := s.repo.CreateInvitation(ctx, invitation); err != nil {
+		var temporaryPassword *string
+		var err error
+		scorerUser, userCreated, temporaryPassword, err = txService.findOrCreateScorer(ctx, actor, *resolvedTask.SchoolID, name, email)
+		if err != nil {
+			return err
+		}
+		if !userCreated && userCredentialPendingDelivery(scorerUser) {
+			temporaryPassword, err = txService.rotateCredentialForPendingDelivery(ctx, scorerUser)
+			if err != nil {
+				return err
+			}
+		}
+
+		taskScorer, relationCreated, err = txService.findOrCreateTaskScorer(ctx, actor, resolvedTask.TaskID, scorerUser.ID)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now()
+		rawToken, tokenHash, err := newInvitationToken()
+		if err != nil {
+			return err
+		}
+		deliveryMode = deliveryModeInApp
+		if temporaryPassword != nil {
+			deliveryMode = deliveryModeEmailAndInApp
+		}
+
+		invitation = &model.TaskScorerInvitation{
+			TaskID:           resolvedTask.TaskID,
+			ScorerID:         scorerUser.ID,
+			EmailSnapshot:    email,
+			RealNameSnapshot: stringPtr(name),
+			TokenHash:        tokenHash,
+			Status:           "sent",
+			SentAt:           now,
+			ExpiresAt:        now.Add(invitationTTL),
+			CreatedBy:        &actor.UserID,
+			Metadata: map[string]any{
+				"mailPending":   temporaryPassword != nil,
+				"deliveryMode":  deliveryMode,
+				"inAppRead":     false,
+				"inAppReadAt":   nil,
+				"createdByFlow": "teacher_invite",
+			},
+		}
+		if err := txService.repo.CreateInvitation(ctx, invitation); err != nil {
+			return err
+		}
+		if temporaryPassword != nil {
+			if err := txService.sendInvitationEmail(ctx, resolvedTask, scorerUser, invitation, rawToken, temporaryPassword); err != nil {
+				return err
+			}
+		} else {
+			if err := txService.updateInvitationInAppMetadata(ctx, invitation); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
 		return nil, err
-	}
-	if userCreated {
-		if err := s.sendInvitationEmail(ctx, resolvedTask, scorerUser, invitation, rawToken, temporaryPassword); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := s.updateInvitationInAppMetadata(ctx, invitation); err != nil {
-			return nil, err
-		}
 	}
 
 	return &InviteTaskScorerResult{

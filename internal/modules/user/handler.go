@@ -16,24 +16,26 @@ type Handler struct {
 }
 
 type createUserRequest struct {
-	Username string  `json:"username" binding:"required"`
-	Password string  `json:"password" binding:"required"`
-	Email    *string `json:"email"`
-	Phone    *string `json:"phone"`
-	RealName *string `json:"realName"`
-	Role     string  `json:"role" binding:"required"`
-	SchoolID *string `json:"schoolId"`
+	Username       string  `json:"username" binding:"required"`
+	Password       string  `json:"password" binding:"required"`
+	Email          *string `json:"email"`
+	Phone          *string `json:"phone"`
+	RealName       *string `json:"realName"`
+	InternalNumber *string `json:"internalNumber"`
+	Role           string  `json:"role" binding:"required"`
+	SchoolID       *string `json:"schoolId"`
 }
 
 type batchCreateUserItemRequest struct {
-	Row      *int    `json:"row"`
-	Username string  `json:"username" binding:"required"`
-	Password string  `json:"password" binding:"required"`
-	Email    *string `json:"email"`
-	Phone    *string `json:"phone"`
-	RealName *string `json:"realName"`
-	Role     string  `json:"role" binding:"required"`
-	SchoolID *string `json:"schoolId"`
+	Row            *int    `json:"row"`
+	Username       string  `json:"username" binding:"required"`
+	Password       string  `json:"password" binding:"required"`
+	Email          *string `json:"email"`
+	Phone          *string `json:"phone"`
+	RealName       *string `json:"realName"`
+	InternalNumber *string `json:"internalNumber"`
+	Role           string  `json:"role" binding:"required"`
+	SchoolID       *string `json:"schoolId"`
 }
 
 type batchCreateUsersRequest struct {
@@ -86,12 +88,13 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 
 	input := CreateUserInput{
-		Username: req.Username,
-		Password: req.Password,
-		Email:    req.Email,
-		Phone:    req.Phone,
-		RealName: req.RealName,
-		Role:     req.Role,
+		Username:       req.Username,
+		Password:       req.Password,
+		Email:          req.Email,
+		Phone:          req.Phone,
+		RealName:       req.RealName,
+		InternalNumber: req.InternalNumber,
+		Role:           req.Role,
 	}
 
 	if req.SchoolID != nil && *req.SchoolID != "" {
@@ -141,14 +144,15 @@ func (h *Handler) BatchCreate(c *gin.Context) {
 	inputs := make([]BatchCreateUserInput, 0, len(req.Items))
 	for _, item := range req.Items {
 		inputs = append(inputs, BatchCreateUserInput{
-			Row:      item.Row,
-			Username: item.Username,
-			Password: item.Password,
-			Email:    item.Email,
-			Phone:    item.Phone,
-			RealName: item.RealName,
-			Role:     item.Role,
-			SchoolID: item.SchoolID,
+			Row:            item.Row,
+			Username:       item.Username,
+			Password:       item.Password,
+			Email:          item.Email,
+			Phone:          item.Phone,
+			RealName:       item.RealName,
+			InternalNumber: item.InternalNumber,
+			Role:           item.Role,
+			SchoolID:       item.SchoolID,
 		})
 	}
 
