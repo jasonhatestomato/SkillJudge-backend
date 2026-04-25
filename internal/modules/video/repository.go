@@ -36,7 +36,7 @@ func NewRepository(db *gorm.DB) *Repository {
 
 func (r *Repository) Create(ctx context.Context, item *model.Video) error {
 	return r.db.WithContext(ctx).
-		Omit("ProjectID", "SchoolID", "StorageURL", "UploadID", "CreatorID").
+		Omit("ProjectID", "SchoolID", "ScorerID", "StorageURL", "UploadID", "CreatorID").
 		Create(item).Error
 }
 
@@ -131,7 +131,12 @@ func (r *Repository) List(ctx context.Context, params ListParams) ([]model.Video
 			Where("school_scope_projects.school_id = ?", *params.SchoolID)
 	}
 	if params.ScorerID != nil {
-		query = query.Where("scorer_id = ?", *params.ScorerID)
+		query = query.
+			Joins("JOIN video_review_assignments AS scorer_scope_assignments ON scorer_scope_assignments.video_id = videos.id").
+			Where("scorer_scope_assignments.scorer_id = ?", *params.ScorerID).
+			Where("scorer_scope_assignments.review_no = ?", 1).
+			Where("scorer_scope_assignments.review_type = ?", "normal").
+			Where("scorer_scope_assignments.status <> ?", "cancelled")
 	}
 	if params.StudentNumber != "" {
 		query = query.Where("student_number = ?", params.StudentNumber)

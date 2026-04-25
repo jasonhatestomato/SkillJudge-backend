@@ -295,50 +295,78 @@ func (ScoringRubric) TableName() string {
 }
 
 type Video struct {
-	ID                uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	ProjectID         uuid.UUID  `gorm:"type:uuid;not null;index"`
-	TaskID            *uuid.UUID `gorm:"type:uuid;index"`
-	SchoolID          *uuid.UUID `gorm:"type:uuid;index"`
-	StudentID         *uuid.UUID `gorm:"type:uuid;index"`
-	ScorerID          *uuid.UUID `gorm:"type:uuid;index"`
-	StudentName       string     `gorm:"size:100;not null"`
-	StudentNumber     string     `gorm:"size:50;not null;index"`
-	Filename          string     `gorm:"size:255;not null"`
-	OriginalFilename  *string    `gorm:"size:255"`
-	FileSize          int64      `gorm:"not null"`
-	Duration          *int
-	Resolution        *string  `gorm:"size:20"`
-	Format            *string  `gorm:"size:20"`
-	StorageURL        *string  `gorm:"size:1000"`
-	StoragePath       *string  `gorm:"size:1000"`
-	UploadID          *string  `gorm:"size:255;index"`
-	Status            string   `gorm:"size:20;default:uploading;index"`
-	TranscodeStatus   *string  `gorm:"size:20"`
-	UploadProgress    int      `gorm:"default:0"`
-	ThumbnailURL      *string  `gorm:"size:1000"`
-	EvaluationStatus  string   `gorm:"size:20;default:pending;index"`
-	AIStatus          string   `gorm:"size:20;default:pending;index"`
-	ManualStatus      string   `gorm:"size:20;default:pending;index"`
-	AIScore           *float64 `gorm:"type:decimal(5,2)"`
-	ManualScore       *float64 `gorm:"type:decimal(5,2)"`
-	AssignedAt        *time.Time
-	CompletedAt       *time.Time
-	CreatorID         *uuid.UUID `gorm:"type:uuid;index"`
-	UploadedAt        *time.Time
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	Metadata          map[string]any `gorm:"type:jsonb;serializer:json"`
-	Project           *Project       `gorm:"foreignKey:ProjectID"`
-	Task              *Task          `gorm:"foreignKey:TaskID"`
-	School            *School
-	Scorer            *User              `gorm:"foreignKey:ScorerID"`
-	Creator           *User              `gorm:"foreignKey:CreatorID"`
-	AIEvaluations     []AIEvaluation     `gorm:"foreignKey:VideoID"`
-	ManualEvaluations []ManualEvaluation `gorm:"foreignKey:VideoID"`
+	ID                   uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	ProjectID            uuid.UUID  `gorm:"type:uuid;not null;index"`
+	TaskID               *uuid.UUID `gorm:"type:uuid;index"`
+	SchoolID             *uuid.UUID `gorm:"type:uuid;index"`
+	StudentID            *uuid.UUID `gorm:"type:uuid;index"`
+	ScorerID             *uuid.UUID `gorm:"type:uuid;index"`
+	StudentName          string     `gorm:"size:100;not null"`
+	StudentNumber        string     `gorm:"size:50;not null;index"`
+	Filename             string     `gorm:"size:255;not null"`
+	OriginalFilename     *string    `gorm:"size:255"`
+	FileSize             int64      `gorm:"not null"`
+	Duration             *int
+	Resolution           *string  `gorm:"size:20"`
+	Format               *string  `gorm:"size:20"`
+	StorageURL           *string  `gorm:"size:1000"`
+	StoragePath          *string  `gorm:"size:1000"`
+	UploadID             *string  `gorm:"size:255;index"`
+	Status               string   `gorm:"size:20;default:uploading;index"`
+	TranscodeStatus      *string  `gorm:"size:20"`
+	UploadProgress       int      `gorm:"default:0"`
+	ThumbnailURL         *string  `gorm:"size:1000"`
+	EvaluationStatus     string   `gorm:"size:20;default:pending;index"`
+	AIStatus             string   `gorm:"size:20;default:pending;index"`
+	ManualStatus         string   `gorm:"size:20;default:pending;index"`
+	AIScore              *float64 `gorm:"type:decimal(5,2)"`
+	ManualScore          *float64 `gorm:"type:decimal(5,2)"`
+	AssignedAt           *time.Time
+	CompletedAt          *time.Time
+	RequiredReviewCount  int        `gorm:"type:smallint;default:1;not null"`
+	SubmittedReviewCount int        `gorm:"type:smallint;default:0;not null"`
+	ScoreDecisionType    *string    `gorm:"size:20"`
+	CreatorID            *uuid.UUID `gorm:"type:uuid;index"`
+	UploadedAt           *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	Metadata             map[string]any `gorm:"type:jsonb;serializer:json"`
+	Project              *Project       `gorm:"foreignKey:ProjectID"`
+	Task                 *Task          `gorm:"foreignKey:TaskID"`
+	School               *School
+	Scorer               *User              `gorm:"foreignKey:ScorerID"`
+	Creator              *User              `gorm:"foreignKey:CreatorID"`
+	AIEvaluations        []AIEvaluation     `gorm:"foreignKey:VideoID"`
+	ManualEvaluations    []ManualEvaluation `gorm:"foreignKey:VideoID"`
 }
 
 func (Video) TableName() string {
 	return "videos"
+}
+
+type VideoReviewAssignment struct {
+	ID                 uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	TaskID             uuid.UUID `gorm:"type:uuid;not null;index"`
+	VideoID            uuid.UUID `gorm:"type:uuid;not null;index"`
+	ScorerID           uuid.UUID `gorm:"type:uuid;not null;index"`
+	ReviewNo           int       `gorm:"type:smallint;not null"`
+	ReviewType         string    `gorm:"size:20;not null;default:normal"`
+	Status             string    `gorm:"size:20;not null;default:pending;index"`
+	AssignedAt         *time.Time
+	StartedAt          *time.Time
+	SubmittedAt        *time.Time
+	SourceAssignmentID *uuid.UUID     `gorm:"type:uuid"`
+	Metadata           map[string]any `gorm:"type:jsonb;serializer:json"`
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	Task               *Task                  `gorm:"foreignKey:TaskID"`
+	Video              *Video                 `gorm:"foreignKey:VideoID"`
+	Scorer             *User                  `gorm:"foreignKey:ScorerID"`
+	SourceAssignment   *VideoReviewAssignment `gorm:"foreignKey:SourceAssignmentID"`
+}
+
+func (VideoReviewAssignment) TableName() string {
+	return "video_review_assignments"
 }
 
 type AIEvaluation struct {
@@ -369,6 +397,7 @@ type ManualEvaluation struct {
 	VideoID      uuid.UUID        `gorm:"type:uuid;not null;index"`
 	ScorerID     uuid.UUID        `gorm:"type:uuid;not null;index"`
 	RubricID     *uuid.UUID       `gorm:"type:uuid;index"`
+	AssignmentID *uuid.UUID       `gorm:"type:uuid;index"`
 	TotalScore   *float64         `gorm:"type:decimal(5,2)"`
 	ScoreDetails []map[string]any `gorm:"type:jsonb;serializer:json"`
 	Comments     *string
@@ -378,10 +407,11 @@ type ManualEvaluation struct {
 	TimeSpent    *int
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
-	Task         *Task          `gorm:"foreignKey:TaskID"`
-	Video        *Video         `gorm:"foreignKey:VideoID"`
-	Scorer       *User          `gorm:"foreignKey:ScorerID"`
-	Rubric       *ScoringRubric `gorm:"foreignKey:RubricID"`
+	Task         *Task                  `gorm:"foreignKey:TaskID"`
+	Video        *Video                 `gorm:"foreignKey:VideoID"`
+	Scorer       *User                  `gorm:"foreignKey:ScorerID"`
+	Rubric       *ScoringRubric         `gorm:"foreignKey:RubricID"`
+	Assignment   *VideoReviewAssignment `gorm:"foreignKey:AssignmentID"`
 }
 
 func (ManualEvaluation) TableName() string {

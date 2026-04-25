@@ -16,3 +16,16 @@ const (
 	ManualEvaluationStatusInProgress = "in_progress"
 	ManualEvaluationStatusSubmitted  = "submitted"
 )
+
+const (
+	ReviewAssignmentStatusPending    = "pending"
+	ReviewAssignmentStatusInProgress = "in_progress"
+	ReviewAssignmentStatusSubmitted  = "submitted"
+	ReviewAssignmentStatusCancelled  = "cancelled"
+)
+
+const (
+	ReviewAssignmentTypeNormal = "normal"
+	SingleReviewNo             = 1
+	ScoreDecisionTypeSingle    = "single"
+)
