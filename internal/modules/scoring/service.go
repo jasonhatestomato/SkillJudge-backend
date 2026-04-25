@@ -203,9 +203,6 @@ func (s *Service) SubmitTask(ctx context.Context, actor user.UserContext, id uui
 	if item == nil || item.ScorerID == nil || item.TaskID == nil {
 		return nil, ErrScoringTaskNotFound
 	}
-	if item.EvaluationStatus == VideoEvaluationStatusCompleted || item.ManualStatus == VideoManualStatusSubmitted {
-		return nil, ErrScoringTaskCompleted
-	}
 
 	now := time.Now()
 	if item.ManualStatus == VideoManualStatusPending {

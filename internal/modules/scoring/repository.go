@@ -2,6 +2,7 @@ package scoring
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -425,11 +426,15 @@ func (r *Repository) SaveManualEvaluationDraft(ctx context.Context, video *model
 			if startedAt == nil {
 				startedAt = startedAtFromAssignment(assignment, video, savedAt)
 			}
+			scoreDetailsJSON, err := json.Marshal(input.ScoreDetails)
+			if err != nil {
+				return err
+			}
 			updates := map[string]any{
 				"rubric_id":     rubricIDFromVideo(video),
 				"assignment_id": assignment.ID,
 				"total_score":   input.TotalScore,
-				"score_details": input.ScoreDetails,
+				"score_details": gorm.Expr("?::jsonb", string(scoreDetailsJSON)),
 				"comments":      input.Comments,
 				"status":        ManualEvaluationStatusInProgress,
 				"started_at":    startedAt,
@@ -529,11 +534,15 @@ func (r *Repository) SubmitManualEvaluation(ctx context.Context, video *model.Vi
 			if startedAt == nil {
 				startedAt = startedAtFromAssignment(assignment, video, submittedAt)
 			}
+			scoreDetailsJSON, err := json.Marshal(input.ScoreDetails)
+			if err != nil {
+				return err
+			}
 			updates := map[string]any{
 				"rubric_id":     rubricIDFromVideo(video),
 				"assignment_id": assignment.ID,
 				"total_score":   input.TotalScore,
-				"score_details": input.ScoreDetails,
+				"score_details": gorm.Expr("?::jsonb", string(scoreDetailsJSON)),
 				"comments":      input.Comments,
 				"status":        ManualEvaluationStatusSubmitted,
 				"started_at":    startedAt,
